@@ -19,8 +19,11 @@ var validStatuses = map[string]bool{
 var moveCmd = &cobra.Command{
 	Use:   "move <id> <status>",
 	Short: "Move a todo to a different status",
-	Long: fmt.Sprintf("Move a todo to a new status. Valid statuses: %s",
+	Long: fmt.Sprintf("Move a todo to a new status.\nValid statuses: %s",
 		strings.Join([]string{"unprocessed", "inbox", "today", "waiting", "done", "stale"}, ", ")),
+	Example: `  todo move a1b2c3 today        # pull into today's focus
+  todo move a1b2c3 waiting      # blocked on something
+  todo move a1b2c3 done         # complete it`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		id := args[0]

@@ -3,12 +3,15 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/anujp/braindump/internal/core"
 )
@@ -666,5 +669,468 @@ func TestInfoWithUnprocessed(t *testing.T) {
 
 	if result["unprocessed"].(float64) != 2 {
 		t.Errorf("expected unprocessed=2, got %v", result["unprocessed"])
+	}
+}
+
+// ---------------------------------------------------------------------------
+// NEW TESTS: Additional API coverage
+// ---------------------------------------------------------------------------
+
+// GET /api/todo?tag=homelab should only return todos with that tag, not all.
+func TestListTodosFilterByTag_ExcludesOtherTags(t *testing.T) {
+	server, _ := setupTestAPI(t)
+
+	createTodo(t, server.URL, "homelab task", []string{"homelab"})
+	createTodo(t, server.URL, "work task", []string{"work"})
+	createTodo(t, server.URL, "both tags", []string{"homelab", "work"})
+
+	resp, err := http.Get(server.URL + "/api/todo?tag=homelab")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+
+	var result []map[string]interface{}
+	readJSON(t, resp, &result)
+
+	if len(result) != 2 {
+		t.Fatalf("expected 2 todos with tag homelab, got %d", len(result))
+	}
+
+	for _, todo := range result {
+		tags := todo["tags"].([]interface{})
+		hasHomelab := false
+		for _, tag := range tags {
+			if tag == "homelab" {
+				hasHomelab = true
+			}
+		}
+		if !hasHomelab {
+			t.Errorf("todo %q should have homelab tag, got tags: %v", todo["text"], tags)
+		}
+	}
+}
+
+// POST /api/todo with empty text should return 400.
+func TestCreateTodoEmptyText(t *testing.T) {
+	server, _ := setupTestAPI(t)
+
+	resp := postJSON(t, server.URL+"/api/todo", map[string]interface{}{
+		"text": "",
+	})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400 for empty text, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+}
+
+// POST /api/todo with whitespace-only text should return 400.
+func TestCreateTodoWhitespaceOnlyText(t *testing.T) {
+	server, _ := setupTestAPI(t)
+
+	resp := postJSON(t, server.URL+"/api/todo", map[string]interface{}{
+		"text": "   \t  ",
+	})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400 for whitespace-only text, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+}
+
+// PATCH /api/todo/:id/status with non-existent ID should return 404.
+func TestChangeStatusNonExistentID(t *testing.T) {
+	server, _ := setupTestAPI(t)
+
+	resp := patchJSON(t, server.URL+"/api/todo/zzz999/status", map[string]string{
+		"status": "today",
+	})
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+}
+
+// POST /api/dump with empty items array should return 201 with count=0.
+func TestBulkCreateEmptyItems(t *testing.T) {
+	server, _ := setupTestAPI(t)
+
+	body := map[string]interface{}{
+		"items": []map[string]interface{}{},
+	}
+	resp := postJSON(t, server.URL+"/api/dump", body)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Count int              `json:"count"`
+		Todos []map[string]interface{} `json:"todos"`
+	}
+	readJSON(t, resp, &result)
+
+	if result.Count != 0 {
+		t.Errorf("expected count=0, got %d", result.Count)
+	}
+	if len(result.Todos) != 0 {
+		t.Errorf("expected 0 todos, got %d", len(result.Todos))
+	}
+}
+
+// POST /api/dump with items containing empty text should skip those items.
+func TestBulkCreateSkipsEmptyText(t *testing.T) {
+	server, _ := setupTestAPI(t)
+
+	body := map[string]interface{}{
+		"items": []map[string]interface{}{
+			{"text": "valid item"},
+			{"text": ""},
+			{"text": "   "},
+			{"text": "another valid"},
+		},
+	}
+	resp := postJSON(t, server.URL+"/api/dump", body)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Count int              `json:"count"`
+		Todos []map[string]interface{} `json:"todos"`
+	}
+	readJSON(t, resp, &result)
+
+	if result.Count != 2 {
+		t.Errorf("expected count=2 (skipping empty text items), got %d", result.Count)
+	}
+}
+
+// --- BREAKING TESTS: API edge cases ---
+
+// POST /api/todo with no Content-Type header — should still work since Go's
+// json.Decoder doesn't check Content-Type.
+func TestCreateTodo_NoContentTypeHeader(t *testing.T) {
+	server, _ := setupTestAPI(t)
+
+	body := `{"text": "no content type"}`
+	req, _ := http.NewRequest(http.MethodPost, server.URL+"/api/todo", strings.NewReader(body))
+	// Deliberately NOT setting Content-Type
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	// NOTE: Go's json.Decoder works regardless of Content-Type header
+	if resp.StatusCode != http.StatusCreated {
+		t.Errorf("expected 201 (json.Decoder doesn't check Content-Type), got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+}
+
+// POST /api/todo with empty body — should return 400.
+func TestCreateTodo_EmptyBody(t *testing.T) {
+	server, _ := setupTestAPI(t)
+
+	req, _ := http.NewRequest(http.MethodPost, server.URL+"/api/todo", strings.NewReader(""))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400 for empty body, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+}
+
+// POST /api/todo with invalid JSON — should return 400.
+func TestCreateTodo_InvalidJSON(t *testing.T) {
+	server, _ := setupTestAPI(t)
+
+	req, _ := http.NewRequest(http.MethodPost, server.URL+"/api/todo", strings.NewReader(`{broken`))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400 for invalid JSON, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+}
+
+// POST /api/todo with extra unknown fields — should be silently ignored.
+func TestCreateTodo_ExtraFields_Ignored(t *testing.T) {
+	server, _ := setupTestAPI(t)
+
+	body := map[string]interface{}{
+		"text":          "with extra fields",
+		"unknown_field": "should be ignored",
+		"another":       42,
+	}
+	resp := postJSON(t, server.URL+"/api/todo", body)
+	if resp.StatusCode != http.StatusCreated {
+		t.Errorf("expected 201 (extra fields ignored), got %d", resp.StatusCode)
+	}
+	var result map[string]interface{}
+	readJSON(t, resp, &result)
+	if result["text"] != "with extra fields" {
+		t.Errorf("text = %q, want 'with extra fields'", result["text"])
+	}
+}
+
+// NOTE: API does NOT validate tags against tags.yaml — any tags are accepted.
+// This documents that behavior (could be a bug or intentional).
+func TestCreateTodo_InvalidTags_NotValidated(t *testing.T) {
+	server, _ := setupTestAPI(t)
+
+	body := map[string]interface{}{
+		"text": "invalid tags test",
+		"tags": []string{"nonexistent_tag", "also_fake"},
+	}
+	resp := postJSON(t, server.URL+"/api/todo", body)
+	// NOTE: The API accepts any tags without validation against tags.yaml.
+	// The CLI validates tags but the API does not.
+	if resp.StatusCode != http.StatusCreated {
+		t.Errorf("NOTE: API accepted invalid tags (no validation), got status %d", resp.StatusCode)
+	}
+
+	var result map[string]interface{}
+	readJSON(t, resp, &result)
+	tags := result["tags"].([]interface{})
+	if len(tags) != 2 || tags[0] != "nonexistent_tag" {
+		t.Errorf("tags = %v, expected [nonexistent_tag also_fake]", tags)
+	}
+}
+
+// PATCH /api/todo/:id/status with empty body — should return 400.
+func TestChangeStatus_EmptyBody(t *testing.T) {
+	server, _ := setupTestAPI(t)
+
+	id := createTodo(t, server.URL, "test", nil)
+
+	req, _ := http.NewRequest(http.MethodPatch, server.URL+"/api/todo/"+id+"/status", strings.NewReader(""))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("PATCH: %v", err)
+	}
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400 for empty body on status change, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+}
+
+// GET /api/todo with multiple filters combined (date + tag + status).
+func TestListTodos_MultipleFiltersCombined(t *testing.T) {
+	server, _ := setupTestAPI(t)
+
+	createTodo(t, server.URL, "matching task", []string{"homelab"})
+	createTodo(t, server.URL, "wrong tag", []string{"work"})
+
+	today := time.Now().Format("2006-01-02")
+	url := fmt.Sprintf("%s/api/todo?date=%s&tag=homelab&status=inbox", server.URL, today)
+	resp, err := http.Get(url)
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+
+	var result []map[string]interface{}
+	readJSON(t, resp, &result)
+
+	if len(result) != 1 {
+		t.Errorf("expected 1 todo matching all filters, got %d", len(result))
+	}
+	if len(result) > 0 && result[0]["text"] != "matching task" {
+		t.Errorf("wrong todo returned: %q", result[0]["text"])
+	}
+}
+
+// POST /api/dump with 100 items — all created.
+func TestBulkCreate_100Items(t *testing.T) {
+	server, _ := setupTestAPI(t)
+
+	items := make([]map[string]interface{}, 100)
+	for i := range items {
+		items[i] = map[string]interface{}{"text": fmt.Sprintf("dump item %d", i)}
+	}
+
+	body := map[string]interface{}{"items": items}
+	resp := postJSON(t, server.URL+"/api/dump", body)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Count int              `json:"count"`
+		Todos []map[string]interface{} `json:"todos"`
+	}
+	readJSON(t, resp, &result)
+
+	if result.Count != 100 {
+		t.Errorf("expected count=100, got %d", result.Count)
+	}
+	if len(result.Todos) != 100 {
+		t.Errorf("expected 100 todos, got %d", len(result.Todos))
+	}
+}
+
+// DELETE /api/todo/:id then GET same id should not be in list.
+func TestDeleteThenGet_NotFound(t *testing.T) {
+	server, _ := setupTestAPI(t)
+
+	id := createTodo(t, server.URL, "delete and check", nil)
+
+	resp := doDelete(t, server.URL+"/api/todo/"+id)
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	// Try to edit the deleted todo — should get 404
+	editResp := putJSON(t, server.URL+"/api/todo/"+id, map[string]interface{}{
+		"text": "should fail",
+	})
+	if editResp.StatusCode != http.StatusNotFound {
+		t.Errorf("expected 404 after delete, got %d", editResp.StatusCode)
+	}
+	editResp.Body.Close()
+}
+
+// GET /api/todo?tag=HOMELAB — case sensitivity test.
+func TestListTodos_TagCaseInsensitive(t *testing.T) {
+	server, _ := setupTestAPI(t)
+
+	createTodo(t, server.URL, "homelab task", []string{"homelab"})
+
+	// The API handler uses strings.EqualFold for tag comparison
+	resp, err := http.Get(server.URL + "/api/todo?tag=HOMELAB")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+
+	var result []map[string]interface{}
+	readJSON(t, resp, &result)
+
+	if len(result) != 1 {
+		t.Errorf("expected 1 todo (case-insensitive tag filter), got %d", len(result))
+	}
+}
+
+// PUT /api/todo/:id/nonexistent — should get method not allowed or 404.
+func TestAPI_UnknownSubpath(t *testing.T) {
+	server, _ := setupTestAPI(t)
+
+	id := createTodo(t, server.URL, "test", nil)
+
+	req, _ := http.NewRequest(http.MethodGet, server.URL+"/api/todo/"+id+"/nonexistent", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request error: %v", err)
+	}
+	// The router only handles /status suffix; anything else should fail
+	if resp.StatusCode == http.StatusOK {
+		t.Errorf("expected non-200 for unknown subpath, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+}
+
+// BUG: POST /api/todo with text ending in {braces} — data loss on round-trip.
+// The parser strips trailing {} blocks from text as metadata.
+func TestCreateTodo_TextEndingWithBraces_DataLoss(t *testing.T) {
+	server, _ := setupTestAPI(t)
+
+	body := map[string]interface{}{
+		"text": "check the {config}",
+		"tags": []string{"work"},
+	}
+	resp := postJSON(t, server.URL+"/api/todo", body)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", resp.StatusCode)
+	}
+
+	var created map[string]interface{}
+	readJSON(t, resp, &created)
+
+	// The response should have the original text (before disk round-trip)
+	if created["text"] != "check the {config}" {
+		t.Errorf("created response text = %q, want 'check the {config}'", created["text"])
+	}
+
+	// Now list and check if it survived the round-trip through disk
+	listResp, err := http.Get(server.URL + "/api/todo")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	var todos []map[string]interface{}
+	readJSON(t, listResp, &todos)
+
+	if len(todos) != 1 {
+		t.Fatalf("expected 1 todo, got %d", len(todos))
+	}
+
+	// BUG: After round-trip through file storage, trailing {config} is stripped
+	if todos[0]["text"] != "check the {config}" {
+		t.Errorf("BUG: Trailing braces stripped after round-trip: got %q, want %q",
+			todos[0]["text"], "check the {config}")
+	}
+}
+
+// Verify that creating a todo via API and then listing with tag filter
+// correctly round-trips through disk storage.
+func TestCreateAndListRoundTrip(t *testing.T) {
+	server, _ := setupTestAPI(t)
+
+	// Create
+	id := createTodo(t, server.URL, "persistent task", []string{"homelab"})
+
+	// List (unfiltered) and verify
+	resp, err := http.Get(server.URL + "/api/todo")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	var all []map[string]interface{}
+	readJSON(t, resp, &all)
+
+	found := false
+	for _, todo := range all {
+		if todo["id"] == id {
+			found = true
+			if todo["text"] != "persistent task" {
+				t.Errorf("text mismatch: got %q", todo["text"])
+			}
+			tags := todo["tags"].([]interface{})
+			if len(tags) != 1 || tags[0] != "homelab" {
+				t.Errorf("tags mismatch: got %v", tags)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("created todo %s not found in list", id)
+	}
+}
+
+// DELETE /api/todo/:id then GET should not include deleted todo.
+func TestDeleteThenListExcludes(t *testing.T) {
+	server, _ := setupTestAPI(t)
+
+	id1 := createTodo(t, server.URL, "keep me", nil)
+	id2 := createTodo(t, server.URL, "delete me", nil)
+
+	resp := doDelete(t, server.URL+"/api/todo/"+id2)
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	listResp, err := http.Get(server.URL + "/api/todo")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	var result []map[string]interface{}
+	readJSON(t, listResp, &result)
+
+	if len(result) != 1 {
+		t.Fatalf("expected 1 todo after delete, got %d", len(result))
+	}
+	if result[0]["id"] != id1 {
+		t.Errorf("expected surviving todo %s, got %s", id1, result[0]["id"])
 	}
 }

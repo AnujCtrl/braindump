@@ -11,9 +11,17 @@ import (
 )
 
 var lsCmd = &cobra.Command{
-	Use:   "ls",
+	Use:   "ls [#tag]",
 	Short: "List todos",
-	RunE:  runList,
+	Long: `List todos for today, a specific date, or all days.
+Filter by tag using #shorthand or --tag flag.`,
+	Example: `  todo ls                       # today's todos
+  todo ls #minecraft            # only minecraft todos
+  todo ls --tag homelab         # same as #homelab
+  todo ls --all                 # all days
+  todo ls --date 2026-03-15     # specific date
+  todo ls --looping             # items stuck in stale loops`,
+	RunE: runList,
 }
 
 func init() {
@@ -28,6 +36,16 @@ func runList(cmd *cobra.Command, args []string) error {
 	tagFilter, _ := cmd.Flags().GetString("tag")
 	dateFilter, _ := cmd.Flags().GetString("date")
 	showLooping, _ := cmd.Flags().GetBool("looping")
+
+	// Support #tag shorthand from positional args.
+	// The --tag flag takes precedence if both are provided.
+	if tagFilter == "" {
+		for _, arg := range args {
+			if strings.HasPrefix(arg, "#") && len(arg) > 1 {
+				tagFilter = arg[1:]
+			}
+		}
+	}
 
 	if showLooping {
 		return listLooping()

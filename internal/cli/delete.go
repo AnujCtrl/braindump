@@ -9,7 +9,9 @@ import (
 var deleteCmd = &cobra.Command{
 	Use:   "delete <id>",
 	Short: "Delete a todo",
-	Args:  cobra.ExactArgs(1),
+	Long:  `Permanently remove a todo by its ID.`,
+	Example: `  todo delete a1b2c3`,
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		id := args[0]
 

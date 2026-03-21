@@ -10,7 +10,11 @@ import (
 var editCmd = &cobra.Command{
 	Use:   "edit <id> <new text> [#tags] [!! !!!]",
 	Short: "Edit a todo",
-	Args:  cobra.MinimumNArgs(2),
+	Long:  `Edit a todo's text, tags, or priority flags.`,
+	Example: `  todo edit a1b2c3 fix the AE2 autocrafter #minecraft #deep-focus
+  todo edit a1b2c3 renew SSL cert #homelab !!
+  todo edit a1b2c3 weekly grocery run #errands`,
+	Args: cobra.MinimumNArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		id := args[0]
 

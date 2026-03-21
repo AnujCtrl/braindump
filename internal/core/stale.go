@@ -27,10 +27,15 @@ func FindStaleItems(store *Store) ([]*Todo, error) {
 		return nil, err
 	}
 
-	cutoff := time.Now().AddDate(0, 0, -staleDays)
+	// Compare calendar dates, not timestamps. A todo created on March 15
+	// becomes stale on March 23 (strictly more than 7 calendar days).
+	now := time.Now()
+	todayDate := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	cutoffDate := todayDate.AddDate(0, 0, -staleDays)
 	var stale []*Todo
 	for _, todo := range all {
-		if todo.Status == "inbox" && todo.Created.Before(cutoff) {
+		createdDate := time.Date(todo.Created.Year(), todo.Created.Month(), todo.Created.Day(), 0, 0, 0, 0, todo.Created.Location())
+		if todo.Status == "inbox" && createdDate.Before(cutoffDate) {
 			stale = append(stale, todo)
 		}
 	}

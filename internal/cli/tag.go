@@ -9,6 +9,9 @@ import (
 var tagCmd = &cobra.Command{
 	Use:   "tag",
 	Short: "Manage tags",
+	Long:  `Manage your tag taxonomy. Tags are defined in tags.yaml.`,
+	Example: `  todo tag list                 # show all tags by group
+  todo tag add cooking          # add a new tag`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return cmd.Usage()
 	},

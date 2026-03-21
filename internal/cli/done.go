@@ -15,8 +15,12 @@ import (
 var doneCmd = &cobra.Command{
 	Use:   "done [id]",
 	Short: "Mark a todo as done",
-	Args:  cobra.MaximumNArgs(1),
-	RunE:  runDone,
+	Long: `Mark a todo as complete. Pass an ID directly, or omit it to pick
+from today's open items interactively.`,
+	Example: `  todo done a1b2c3              # mark by ID
+  todo done                     # interactive picker from today`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: runDone,
 }
 
 func runDone(cmd *cobra.Command, args []string) error {
