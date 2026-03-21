@@ -1,0 +1,2 @@
+- [bugs_found.md](bugs_found.md) - Bugs discovered during test audit: tag shorthand ignored in ls, subtask parsing, cobra flag leakage
+- [test_patterns.md](test_patterns.md) - Test patterns and gotchas for the braindump CLI test suite

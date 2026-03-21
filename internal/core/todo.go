@@ -66,7 +66,14 @@ func ParseTodoLine(line string) (*Todo, error) {
 	}
 	todo.Tags = tags
 
-	// Extract {key:value} metadata fields from the end
+	// Extract {key:value} metadata fields from the end.
+	// Only strip blocks with known metadata keys; unknown {braces} are user text.
+	// If a known key appears twice (user text happened to match), stop parsing.
+	knownKeys := map[string]bool{
+		"id": true, "source": true, "status": true, "created": true,
+		"urgent": true, "important": true, "stale_count": true,
+	}
+	seenKeys := make(map[string]bool)
 	for {
 		rest = strings.TrimRight(rest, " ")
 		if !strings.HasSuffix(rest, "}") {
@@ -77,14 +84,21 @@ func ParseTodoLine(line string) (*Todo, error) {
 			break
 		}
 		meta := rest[openIdx+1 : len(rest)-1]
-		rest = rest[:openIdx]
 
 		colonIdx := strings.Index(meta, ":")
 		if colonIdx == -1 {
-			continue
+			break // Not metadata — stop stripping
 		}
 		key := meta[:colonIdx]
+		if !knownKeys[key] {
+			break // Unknown key — this is user text, stop stripping
+		}
+		if seenKeys[key] {
+			break // Duplicate key — this is user text, stop stripping
+		}
+		seenKeys[key] = true
 		value := meta[colonIdx+1:]
+		rest = rest[:openIdx]
 
 		switch key {
 		case "id":
@@ -241,8 +255,8 @@ func ParseDayFile(content string) ([]*Todo, error) {
 			continue
 		}
 
-		// Start of a new todo line
-		if strings.HasPrefix(trimmed, "- [") {
+		// Start of a new todo line (must be at column 0, not indented subtasks)
+		if strings.HasPrefix(line, "- [") {
 			if err := flushBlock(); err != nil {
 				return nil, err
 			}

@@ -23,9 +23,21 @@ var reservedNames = map[string]bool{
 }
 
 var RootCmd = &cobra.Command{
-	Use:                "todo",
-	Short:              "Fast brain dump capture system",
-	Long:               "A capture-first todo system designed for low friction brain dumps.",
+	Use:   "todo",
+	Short: "Fast brain dump capture system",
+	Long: `A capture-first todo system designed for low friction brain dumps.
+
+The default action is capture — just type what's on your mind.
+Use #tags to categorize, @source for origin, !! for urgent, !!! for important.
+No tags? It gets tagged #braindump automatically.`,
+	Example: `  todo fix the nether portal #minecraft #deep-focus
+  todo buy groceries #errands !!
+  todo check SSL cert expiry #homelab !!!
+  todo call dentist #health --note "555-1234"
+  todo check issue \#42 on github #work
+  todo -- dump the old hard drives
+  todo '#'                                  # list all tags
+  todo '@'                                  # list all sources`,
 	Args:             cobra.ArbitraryArgs,
 	TraverseChildren: true,
 	FParseErrWhitelist: cobra.FParseErrWhitelist{

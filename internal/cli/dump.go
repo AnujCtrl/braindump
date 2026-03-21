@@ -14,7 +14,19 @@ import (
 var dumpCmd = &cobra.Command{
 	Use:   "dump",
 	Short: "Brain dump: capture multiple todos quickly",
-	RunE:  runDump,
+	Long: `Brain dump mode — enter one todo per line, empty line to finish.
+Each line supports inline #tags, @source, !!, and !!!.
+Lines without tags get #braindump. Use --tag to batch-tag everything.`,
+	Example: `  todo dump
+  > fix the nether portal #minecraft
+  > buy groceries #errands !!
+  > check SSL cert
+  > that DNS thing
+  >
+  Created 4 todos. (#minecraft: 1, #errands: 1, #braindump: 2)
+
+  todo dump --tag homelab        # batch-tag all items #homelab`,
+	RunE: runDump,
 }
 
 func init() {

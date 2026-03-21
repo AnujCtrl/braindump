@@ -10,7 +10,11 @@ import (
 var staleCmd = &cobra.Command{
 	Use:   "stale [revive <id>]",
 	Short: "Show stale todos or revive one",
-	Args:  cobra.MaximumNArgs(2),
+	Long: `Show inbox items untouched for 7+ days, or revive one back to inbox.
+Reviving increments stale_count — items that go stale twice are "looping".`,
+	Example: `  todo stale                    # list stale items
+  todo stale revive a1b2c3      # move back to inbox`,
+	Args: cobra.MaximumNArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Handle "stale revive <id>"
 		if len(args) >= 1 && args[0] == "revive" {
@@ -57,6 +61,9 @@ func runRevive(id string) error {
 var loopingCmd = &cobra.Command{
 	Use:   "looping",
 	Short: "Show looping todos (stale_count >= 2)",
+	Long: `Show todos stuck in stale loops (gone stale 2+ times).
+These need a decision: do it, break it down, or drop it.`,
+	Example: `  todo looping`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		items, err := core.FindLoopingItems(store)
 		if err != nil {
