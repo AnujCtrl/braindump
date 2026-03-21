@@ -5,10 +5,11 @@ import (
 	"fmt"
 )
 
-// GenerateID returns a 6-character lowercase hex string (e.g., "a1b2c3").
+// GenerateID returns an 8-character lowercase hex string (e.g., "a1b2c3d4").
 // Uses crypto/rand for cryptographically secure randomness.
+// 4 bytes = ~4.3 billion possibilities, making collisions negligible.
 func GenerateID() (string, error) {
-	b := make([]byte, 3) // 3 bytes = 6 hex chars
+	b := make([]byte, 4) // 4 bytes = 8 hex chars
 	if _, err := rand.Read(b); err != nil {
 		return "", fmt.Errorf("generating id: %w", err)
 	}

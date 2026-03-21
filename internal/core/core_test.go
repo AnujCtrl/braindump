@@ -18,8 +18,8 @@ func TestGenerateID_Format(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateID() error: %v", err)
 	}
-	if len(id) != 6 {
-		t.Errorf("expected 6-char ID, got %q (len %d)", id, len(id))
+	if len(id) != 8 {
+		t.Errorf("expected 8-char ID, got %q (len %d)", id, len(id))
 	}
 	for _, c := range id {
 		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
