@@ -119,5 +119,6 @@ func init() {
 	RootCmd.AddCommand(tagCmd)
 	RootCmd.AddCommand(staleCmd)
 	RootCmd.AddCommand(loopingCmd)
+	RootCmd.AddCommand(printCmd)
 }
 

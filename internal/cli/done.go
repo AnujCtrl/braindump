@@ -4,11 +4,9 @@ import (
 	"bufio"
 	"fmt"
 	"os"
-	"strconv"
-	"strings"
 	"time"
 
-	"github.com/anujp/braindump/internal/core"
+	"github.com/anujp/braindump/internal/printer"
 	"github.com/spf13/cobra"
 )
 
@@ -49,51 +47,37 @@ func markDoneByID(id string) error {
 		return err
 	}
 
+	// Celebration for active items
+	if oldStatus == "active" {
+		fmt.Println(printer.RandomCelebration(todo))
+	}
+
 	fmt.Printf("Done: [%s] %s\n", todo.ID, todo.Text)
 	printInfoLine()
 	return nil
 }
 
 func markDoneInteractive() error {
-	today := time.Now().Format("2006-01-02")
-	todos, err := store.ReadDay(today)
+	items, err := collectByStatus("active")
 	if err != nil {
 		return err
 	}
 
-	// Filter to non-done items.
-	var open []*openItem
-	for _, t := range todos {
-		if !t.Done {
-			open = append(open, &openItem{todo: t, date: today})
-		}
-	}
-
-	if len(open) == 0 {
-		fmt.Println("No open items today.")
+	if len(items) == 0 {
+		fmt.Println("No active items.")
 		printInfoLine()
 		return nil
 	}
 
-	// Present numbered list.
-	for i, item := range open {
-		fmt.Printf("  %d) [%s] %s\n", i+1, item.todo.ID, item.todo.Text)
-	}
-
-	fmt.Print("\nSelect number: ")
 	scanner := bufio.NewScanner(os.Stdin)
-	if !scanner.Scan() {
+	selected, err := pickFromList(items, "\nSelect number: ", scanner)
+	if err != nil {
+		return err
+	}
+	if selected == nil {
 		return nil
 	}
 
-	input := strings.TrimSpace(scanner.Text())
-	num, err := strconv.Atoi(input)
-	if err != nil || num < 1 || num > len(open) {
-		return fmt.Errorf("invalid selection: %s", input)
-	}
-
-	selected := open[num-1]
-	oldStatus := selected.todo.Status
 	selected.todo.Status = "done"
 	selected.todo.StatusChanged = time.Now()
 	selected.todo.Done = true
@@ -102,16 +86,12 @@ func markDoneInteractive() error {
 		return err
 	}
 
-	if err := logger.LogStatusChange(selected.date, selected.todo.ID, oldStatus, "done"); err != nil {
+	if err := logger.LogStatusChange(selected.date, selected.todo.ID, "active", "done"); err != nil {
 		return err
 	}
 
+	fmt.Println(printer.RandomCelebration(selected.todo))
 	fmt.Printf("Done: [%s] %s\n", selected.todo.ID, selected.todo.Text)
 	printInfoLine()
 	return nil
-}
-
-type openItem struct {
-	todo *core.Todo
-	date string
 }
