@@ -10,7 +10,7 @@ import (
 var validStatuses = map[string]bool{
 	"unprocessed": true,
 	"inbox":       true,
-	"today":       true,
+	"active":      true,
 	"waiting":     true,
 	"done":        true,
 	"stale":       true,

@@ -4,7 +4,10 @@ import (
 	"time"
 )
 
-const staleDays = 7
+const (
+	staleDays         = 7
+	staleActiveHours  = 24
+)
 
 // allTodos is a helper that flattens ReadAllDays into a single slice.
 func allTodos(store *Store) ([]*Todo, error) {
@@ -19,24 +22,39 @@ func allTodos(store *Store) ([]*Todo, error) {
 	return all, nil
 }
 
-// FindStaleItems scans all todos and returns those with status "inbox"
-// whose created time is more than 7 days ago.
+// FindStaleItems scans all todos and returns stale candidates:
+// - "inbox" items whose created time is more than 7 calendar days ago
+// - "active" items whose StatusChanged (or Created if zero) is more than 24 hours ago
 func FindStaleItems(store *Store) ([]*Todo, error) {
 	all, err := allTodos(store)
 	if err != nil {
 		return nil, err
 	}
 
-	// Compare calendar dates, not timestamps. A todo created on March 15
-	// becomes stale on March 23 (strictly more than 7 calendar days).
 	now := time.Now()
-	todayDate := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-	cutoffDate := todayDate.AddDate(0, 0, -staleDays)
+	// Use UTC for comparisons since stored times are parsed as UTC
+	// (the time format does not include timezone info)
+	nowUTC := now.UTC()
+	todayDate := time.Date(nowUTC.Year(), nowUTC.Month(), nowUTC.Day(), 0, 0, 0, 0, time.UTC)
+	inboxCutoff := todayDate.AddDate(0, 0, -staleDays)
+	activeCutoff := nowUTC.Add(-time.Duration(staleActiveHours) * time.Hour)
+
 	var stale []*Todo
 	for _, todo := range all {
-		createdDate := time.Date(todo.Created.Year(), todo.Created.Month(), todo.Created.Day(), 0, 0, 0, 0, todo.Created.Location())
-		if todo.Status == "inbox" && createdDate.Before(cutoffDate) {
-			stale = append(stale, todo)
+		switch todo.Status {
+		case "inbox":
+			createdDate := time.Date(todo.Created.Year(), todo.Created.Month(), todo.Created.Day(), 0, 0, 0, 0, todo.Created.Location())
+			if createdDate.Before(inboxCutoff) {
+				stale = append(stale, todo)
+			}
+		case "active":
+			refTime := todo.StatusChanged
+			if refTime.IsZero() {
+				refTime = todo.Created
+			}
+			if refTime.Before(activeCutoff) {
+				stale = append(stale, todo)
+			}
 		}
 	}
 	return stale, nil
@@ -47,6 +65,7 @@ func FindStaleItems(store *Store) ([]*Todo, error) {
 func MarkStale(store *Store, logger *Logger, todo *Todo) error {
 	oldStatus := todo.Status
 	todo.Status = "stale"
+	todo.StatusChanged = time.Now()
 
 	date := todo.Created.Format("2006-01-02")
 	if err := store.UpdateTodo(todo); err != nil {
@@ -60,6 +79,7 @@ func MarkStale(store *Store, logger *Logger, todo *Todo) error {
 func ReviveTodo(store *Store, logger *Logger, todo *Todo) error {
 	todo.Status = "inbox"
 	todo.StaleCount++
+	todo.StatusChanged = time.Now()
 
 	date := todo.Created.Format("2006-01-02")
 	if err := store.UpdateTodo(todo); err != nil {

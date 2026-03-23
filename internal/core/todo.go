@@ -10,18 +10,19 @@ const timeFormat = "2006-01-02T15:04:05"
 
 // Todo represents a single captured item with metadata.
 type Todo struct {
-	ID         string
-	Text       string
-	Source     string
-	Status     string // unprocessed, inbox, today, waiting, done, stale
-	Created    time.Time
-	Urgent     bool
-	Important  bool
-	StaleCount int
-	Tags       []string
-	Notes      []string // lines from > prefixed notes
-	Subtasks   []string // lines from indented - [ ] subtasks
-	Done       bool     // checkbox state
+	ID             string
+	Text           string
+	Source         string
+	Status         string // unprocessed, inbox, active, waiting, done, stale
+	Created        time.Time
+	StatusChanged  time.Time // when the status last changed (zero = legacy/unset)
+	Urgent         bool
+	Important      bool
+	StaleCount     int
+	Tags           []string
+	Notes          []string // lines from > prefixed notes
+	Subtasks       []string // lines from indented - [ ] subtasks
+	Done           bool     // checkbox state
 }
 
 // ParseTodoLine parses a single markdown todo line into a Todo struct.
@@ -72,6 +73,7 @@ func ParseTodoLine(line string) (*Todo, error) {
 	knownKeys := map[string]bool{
 		"id": true, "source": true, "status": true, "created": true,
 		"urgent": true, "important": true, "stale_count": true,
+		"status_changed": true,
 	}
 	seenKeys := make(map[string]bool)
 	for {
@@ -106,7 +108,17 @@ func ParseTodoLine(line string) (*Todo, error) {
 		case "source":
 			todo.Source = value
 		case "status":
+			// Normalize legacy "today" status to "active"
+			if value == "today" {
+				value = "active"
+			}
 			todo.Status = value
+		case "status_changed":
+			t, err := time.Parse(timeFormat, value)
+			if err != nil {
+				return nil, fmt.Errorf("parsing status_changed time %q: %w", value, err)
+			}
+			todo.StatusChanged = t
 		case "created":
 			t, err := time.Parse(timeFormat, value)
 			if err != nil {
@@ -177,6 +189,12 @@ func (t *Todo) ToMarkdown() string {
 	b.WriteString(" {stale_count:")
 	b.WriteString(fmt.Sprintf("%d", t.StaleCount))
 	b.WriteString("}")
+
+	if !t.StatusChanged.IsZero() {
+		b.WriteString(" {status_changed:")
+		b.WriteString(t.StatusChanged.Format(timeFormat))
+		b.WriteString("}")
+	}
 
 	// Tags
 	for _, tag := range t.Tags {

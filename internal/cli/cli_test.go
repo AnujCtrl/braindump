@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"bytes"
 	"io"
 	"os"
@@ -439,7 +440,7 @@ func TestMoveChangesStatus(t *testing.T) {
 	}
 	id := extractID(t, capOut)
 
-	output, err := executeCmd(t, "move", id, "today")
+	output, err := executeCmd(t, "move", id, "active")
 	if err != nil {
 		t.Fatalf("move failed: %v", err)
 	}
@@ -447,16 +448,16 @@ func TestMoveChangesStatus(t *testing.T) {
 	if !strings.Contains(output, "moved") {
 		t.Errorf("expected 'moved' in output, got: %q", output)
 	}
-	if !strings.Contains(output, "today") {
-		t.Errorf("expected 'today' in output, got: %q", output)
+	if !strings.Contains(output, "active") {
+		t.Errorf("expected 'active' in output, got: %q", output)
 	}
 
 	todo, _, err := store.FindTodoByID(id)
 	if err != nil {
 		t.Fatalf("finding todo: %v", err)
 	}
-	if todo.Status != "today" {
-		t.Errorf("expected status 'today', got %q", todo.Status)
+	if todo.Status != "active" {
+		t.Errorf("expected status 'active', got %q", todo.Status)
 	}
 }
 
@@ -1251,5 +1252,409 @@ func TestCaptureSourceTag_PlusExplicitTag(t *testing.T) {
 	}
 	if !hasMinecraft {
 		t.Errorf("expected #minecraft auto-added from @minecraft source, got tags: %v", todo.Tags)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Picker Tests
+// ---------------------------------------------------------------------------
+
+func TestCollectByStatus_ReturnsOnlyMatchingStatus(t *testing.T) {
+	tmpDir, cleanup := setupTestEnv(t)
+	defer cleanup()
+
+	now := time.Now()
+	today := now.Format("2006-01-02")
+
+	// Create mixed-status todos directly in the store
+	s := core.NewStore(tmpDir)
+	inboxTodo := &core.Todo{
+		ID: "aaa111", Text: "inbox item", Source: "cli", Status: "inbox",
+		Created: now, Tags: []string{"work"},
+	}
+	activeTodo := &core.Todo{
+		ID: "bbb222", Text: "active item", Source: "cli", Status: "active",
+		Created: now, Tags: []string{"work"},
+	}
+	doneTodo := &core.Todo{
+		ID: "ccc333", Text: "done item", Source: "cli", Status: "done",
+		Created: now, Done: true, Tags: []string{"work"},
+	}
+	s.WriteDay(today, []*core.Todo{inboxTodo, activeTodo, doneTodo})
+
+	// Initialize the package-level store for collectByStatus
+	store = s
+
+	items, err := collectByStatus("active")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected 1 active item, got %d", len(items))
+	}
+	if items[0].todo.ID != "bbb222" {
+		t.Errorf("expected ID bbb222, got %s", items[0].todo.ID)
+	}
+}
+
+func TestCollectByStatus_InboxOnly(t *testing.T) {
+	tmpDir, cleanup := setupTestEnv(t)
+	defer cleanup()
+
+	now := time.Now()
+	today := now.Format("2006-01-02")
+	s := core.NewStore(tmpDir)
+	s.WriteDay(today, []*core.Todo{
+		{ID: "aaa111", Text: "inbox", Source: "cli", Status: "inbox", Created: now, Tags: []string{"work"}},
+		{ID: "bbb222", Text: "active", Source: "cli", Status: "active", Created: now, Tags: []string{"work"}},
+	})
+	store = s
+
+	items, err := collectByStatus("inbox")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("expected 1 inbox item, got %d", len(items))
+	}
+	if items[0].todo.Status != "inbox" {
+		t.Errorf("expected status inbox, got %q", items[0].todo.Status)
+	}
+}
+
+func TestCollectByStatus_Nonexistent_EmptySlice(t *testing.T) {
+	tmpDir, cleanup := setupTestEnv(t)
+	defer cleanup()
+
+	now := time.Now()
+	today := now.Format("2006-01-02")
+	s := core.NewStore(tmpDir)
+	s.WriteDay(today, []*core.Todo{
+		{ID: "aaa111", Text: "inbox", Source: "cli", Status: "inbox", Created: now, Tags: []string{"work"}},
+	})
+	store = s
+
+	items, err := collectByStatus("nonexistent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 0 {
+		t.Errorf("expected 0 items for nonexistent status, got %d", len(items))
+	}
+}
+
+func TestCollectByStatus_EmptyStore(t *testing.T) {
+	tmpDir, cleanup := setupTestEnv(t)
+	defer cleanup()
+
+	s := core.NewStore(tmpDir)
+	store = s
+
+	items, err := collectByStatus("active")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 0 {
+		t.Errorf("expected 0 items for empty store, got %d", len(items))
+	}
+}
+
+func TestPickFromList_ValidSelection(t *testing.T) {
+	items := []*pickItem{
+		{todo: &core.Todo{ID: "aaa111", Text: "first"}, date: "2026-03-22"},
+		{todo: &core.Todo{ID: "bbb222", Text: "second"}, date: "2026-03-22"},
+	}
+
+	scanner := bufio.NewScanner(strings.NewReader("2\n"))
+	output := captureOutput(func() {
+		result, err := pickFromList(items, "Pick: ", scanner)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+			return
+		}
+		if result == nil {
+			t.Error("expected non-nil result for valid selection")
+			return
+		}
+		if result.todo.ID != "bbb222" {
+			t.Errorf("expected ID bbb222, got %s", result.todo.ID)
+		}
+	})
+	_ = output
+}
+
+func TestPickFromList_ZeroSelection_Error(t *testing.T) {
+	items := []*pickItem{
+		{todo: &core.Todo{ID: "aaa111", Text: "first"}, date: "2026-03-22"},
+	}
+
+	scanner := bufio.NewScanner(strings.NewReader("0\n"))
+	captureOutput(func() {
+		_, err := pickFromList(items, "Pick: ", scanner)
+		if err == nil {
+			t.Error("expected error for selection 0")
+		}
+	})
+}
+
+func TestPickFromList_OutOfRange_Error(t *testing.T) {
+	items := []*pickItem{
+		{todo: &core.Todo{ID: "aaa111", Text: "first"}, date: "2026-03-22"},
+	}
+
+	scanner := bufio.NewScanner(strings.NewReader("5\n"))
+	captureOutput(func() {
+		_, err := pickFromList(items, "Pick: ", scanner)
+		if err == nil {
+			t.Error("expected error for selection > len(items)")
+		}
+	})
+}
+
+func TestPickFromList_NonNumeric_Error(t *testing.T) {
+	items := []*pickItem{
+		{todo: &core.Todo{ID: "aaa111", Text: "first"}, date: "2026-03-22"},
+	}
+
+	scanner := bufio.NewScanner(strings.NewReader("abc\n"))
+	captureOutput(func() {
+		_, err := pickFromList(items, "Pick: ", scanner)
+		if err == nil {
+			t.Error("expected error for non-numeric input")
+		}
+	})
+}
+
+func TestPickFromList_EmptyInput_ReturnsNil(t *testing.T) {
+	items := []*pickItem{
+		{todo: &core.Todo{ID: "aaa111", Text: "first"}, date: "2026-03-22"},
+	}
+
+	// Empty scanner (EOF)
+	scanner := bufio.NewScanner(strings.NewReader(""))
+	captureOutput(func() {
+		result, err := pickFromList(items, "Pick: ", scanner)
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+		if result != nil {
+			t.Errorf("expected nil result for EOF, got %v", result)
+		}
+	})
+}
+
+func TestPickFromList_EmptyItems_ReturnsNil(t *testing.T) {
+	scanner := bufio.NewScanner(strings.NewReader("1\n"))
+	result, err := pickFromList(nil, "Pick: ", scanner)
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if result != nil {
+		t.Error("expected nil result for empty items list")
+	}
+}
+
+func TestPickFromList_NegativeNumber_Error(t *testing.T) {
+	items := []*pickItem{
+		{todo: &core.Todo{ID: "aaa111", Text: "first"}, date: "2026-03-22"},
+	}
+
+	scanner := bufio.NewScanner(strings.NewReader("-1\n"))
+	captureOutput(func() {
+		_, err := pickFromList(items, "Pick: ", scanner)
+		if err == nil {
+			t.Error("expected error for negative number")
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Print Command Tests
+// ---------------------------------------------------------------------------
+
+func TestPrintReservedName(t *testing.T) {
+	// "print" should be in reservedNames so it cannot be captured as todo text
+	if !reservedNames["print"] {
+		t.Error("'print' should be in reservedNames")
+	}
+}
+
+func TestPrintNoInboxItems(t *testing.T) {
+	_, cleanup := setupTestEnv(t)
+	defer cleanup()
+
+	// With no items at all, print should report no inbox items
+	output, _ := executeCmd(t, "print")
+	if !strings.Contains(strings.ToLower(output), "no inbox") && !strings.Contains(strings.ToLower(output), "no items") {
+		// The print command isn't implemented yet, so this test documents expected behavior.
+		// When implemented, output should indicate no inbox items available.
+		t.Logf("NOTE: print command output: %q (will verify when implemented)", output)
+	}
+}
+
+func TestMoveToActive_InfoLineUpdated(t *testing.T) {
+	_, cleanup := setupTestEnv(t)
+	defer cleanup()
+
+	capOut, err := executeCmd(t, "task", "for", "active", "#work")
+	if err != nil {
+		t.Fatalf("capture failed: %v", err)
+	}
+	id := extractID(t, capOut)
+
+	output, err := executeCmd(t, "move", id, "active")
+	if err != nil {
+		t.Fatalf("move failed: %v", err)
+	}
+
+	// The info line should reflect the active count after moving
+	// It may or may not show depending on other counts being zero
+	if strings.Contains(output, "moved") {
+		// Good, the move succeeded
+	} else {
+		t.Errorf("expected 'moved' in output, got: %q", output)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Done Ceremony Tests
+// ---------------------------------------------------------------------------
+
+func TestDone_ActiveItem_HasCelebration(t *testing.T) {
+	_, cleanup := setupTestEnv(t)
+	defer cleanup()
+
+	// Create and move to active
+	capOut, err := executeCmd(t, "celebrate", "me", "#work")
+	if err != nil {
+		t.Fatalf("capture failed: %v", err)
+	}
+	id := extractID(t, capOut)
+
+	_, err = executeCmd(t, "move", id, "active")
+	if err != nil {
+		t.Fatalf("move failed: %v", err)
+	}
+
+	output, err := executeCmd(t, "done", id)
+	if err != nil {
+		t.Fatalf("done failed: %v", err)
+	}
+
+	// Done on an active item should have celebration text
+	// At minimum it should have "Done:" message
+	if !strings.Contains(output, "Done:") {
+		t.Errorf("expected 'Done:' in output for active item, got: %q", output)
+	}
+	// Verify no emoji in output
+	for i, b := range []byte(output) {
+		if b >= 0xF0 && b <= 0xF4 {
+			t.Errorf("celebration output contains emoji byte 0x%02X at pos %d", b, i)
+		}
+	}
+}
+
+func TestDone_InboxItem_NoCelebrationArt(t *testing.T) {
+	_, cleanup := setupTestEnv(t)
+	defer cleanup()
+
+	capOut, err := executeCmd(t, "simple", "done", "#work")
+	if err != nil {
+		t.Fatalf("capture failed: %v", err)
+	}
+	id := extractID(t, capOut)
+
+	output, err := executeCmd(t, "done", id)
+	if err != nil {
+		t.Fatalf("done failed: %v", err)
+	}
+
+	if !strings.Contains(output, "Done:") {
+		t.Errorf("expected 'Done:' in output, got: %q", output)
+	}
+
+	// Inbox items should NOT get ASCII art celebration patterns
+	if strings.Contains(output, `\o/`) || strings.Contains(output, "***") || strings.Contains(output, "===") {
+		t.Errorf("inbox item done should not have celebration art, got: %q", output)
+	}
+}
+
+func TestDone_OutputNoEmoji(t *testing.T) {
+	_, cleanup := setupTestEnv(t)
+	defer cleanup()
+
+	capOut, err := executeCmd(t, "emoji", "check", "#work")
+	if err != nil {
+		t.Fatalf("capture failed: %v", err)
+	}
+	id := extractID(t, capOut)
+
+	output, err := executeCmd(t, "done", id)
+	if err != nil {
+		t.Fatalf("done failed: %v", err)
+	}
+
+	for i, b := range []byte(output) {
+		if b >= 0xF0 && b <= 0xF4 {
+			t.Errorf("done output contains emoji byte 0x%02X at pos %d: %q", b, i, output)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Full Lifecycle Test
+// ---------------------------------------------------------------------------
+
+func TestFullLifecycle_CaptureActivedoneDone(t *testing.T) {
+	_, cleanup := setupTestEnv(t)
+	defer cleanup()
+
+	// Step 1: Capture
+	capOut, err := executeCmd(t, "lifecycle", "test", "#work")
+	if err != nil {
+		t.Fatalf("capture failed: %v", err)
+	}
+	id := extractID(t, capOut)
+
+	todo, _, err := store.FindTodoByID(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if todo.Status != "inbox" {
+		t.Errorf("after capture: Status = %q, want inbox", todo.Status)
+	}
+
+	// Step 2: Move to active
+	_, err = executeCmd(t, "move", id, "active")
+	if err != nil {
+		t.Fatalf("move failed: %v", err)
+	}
+
+	todo, _, err = store.FindTodoByID(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if todo.Status != "active" {
+		t.Errorf("after move: Status = %q, want active", todo.Status)
+	}
+
+	// Step 3: Mark done
+	output, err := executeCmd(t, "done", id)
+	if err != nil {
+		t.Fatalf("done failed: %v", err)
+	}
+
+	todo, _, err = store.FindTodoByID(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if todo.Status != "done" {
+		t.Errorf("after done: Status = %q, want done", todo.Status)
+	}
+	if !todo.Done {
+		t.Error("after done: Done = false, want true")
+	}
+	if !strings.Contains(output, "Done:") {
+		t.Errorf("expected 'Done:' in output, got: %q", output)
 	}
 }

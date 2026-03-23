@@ -363,7 +363,7 @@ func TestStore_UpdateTodo(t *testing.T) {
 	}
 
 	todo.Text = "Updated text"
-	todo.Status = "today"
+	todo.Status = "active"
 	if err := store.UpdateTodo(todo); err != nil {
 		t.Fatalf("UpdateTodo error: %v", err)
 	}
@@ -375,8 +375,8 @@ func TestStore_UpdateTodo(t *testing.T) {
 	if found.Text != "Updated text" {
 		t.Errorf("Text = %q, want Updated text", found.Text)
 	}
-	if found.Status != "today" {
-		t.Errorf("Status = %q, want today", found.Status)
+	if found.Status != "active" {
+		t.Errorf("Status = %q, want active", found.Status)
 	}
 }
 
@@ -636,7 +636,7 @@ func TestLogStatusChange(t *testing.T) {
 	dir := t.TempDir()
 	logger := NewLogger(dir)
 
-	if err := logger.LogStatusChange("2026-03-10", "aaa111", "inbox", "today"); err != nil {
+	if err := logger.LogStatusChange("2026-03-10", "aaa111", "inbox", "active"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -645,7 +645,7 @@ func TestLogStatusChange(t *testing.T) {
 	if !strings.Contains(content, "status") {
 		t.Error("log missing 'status' keyword")
 	}
-	if !strings.Contains(content, "inbox->today") {
+	if !strings.Contains(content, "inbox->active") {
 		t.Error("log missing status transition")
 	}
 }
@@ -716,8 +716,9 @@ func TestFindStaleItems(t *testing.T) {
 	staleItem := newTestTodo("aaa111", "Old inbox", "inbox", oldDate)
 	// Recent inbox item -> not stale
 	recentItem := newTestTodo("bbb222", "Recent inbox", "inbox", recentDate)
-	// Old non-inbox item -> should NOT be returned
-	todayItem := newTestTodo("ccc333", "Old today", "today", oldDate)
+	// Old active item with RECENT StatusChanged -> should NOT be stale (24h active timeout)
+	todayItem := newTestTodo("ccc333", "Old active", "active", oldDate)
+	todayItem.StatusChanged = time.Now() // just moved to active, not stale yet
 
 	for _, todo := range []*Todo{staleItem, recentItem, todayItem} {
 		if err := store.AddTodo(todo); err != nil {
@@ -898,7 +899,7 @@ func TestFormatInfoLine(t *testing.T) {
 		{
 			name: "has counts",
 			info: InfoLine{Unprocessed: 3, Looping: 1},
-			want: "── 📬 Unprocessed: 3 │ 🔁 Looping: 1 ──",
+			want: "-- Unprocessed: 3 | Looping: 1 --",
 		},
 	}
 
@@ -1078,7 +1079,7 @@ func TestStore_FindTodoByID_AfterUpdate(t *testing.T) {
 
 	// Mutate and update
 	todo.Text = "Changed"
-	todo.Status = "today"
+	todo.Status = "active"
 	todo.Tags = []string{"homelab", "work"}
 	todo.Urgent = true
 	if err := store.UpdateTodo(todo); err != nil {
@@ -1092,8 +1093,8 @@ func TestStore_FindTodoByID_AfterUpdate(t *testing.T) {
 	if found.Text != "Changed" {
 		t.Errorf("Text = %q, want Changed", found.Text)
 	}
-	if found.Status != "today" {
-		t.Errorf("Status = %q, want today", found.Status)
+	if found.Status != "active" {
+		t.Errorf("Status = %q, want active", found.Status)
 	}
 	if !found.Urgent {
 		t.Error("Urgent = false, want true")
@@ -1161,7 +1162,7 @@ func TestStore_AddTodo_ReadDay_FileRoundTrip(t *testing.T) {
 	// NOTE: Subtasks are excluded due to ParseDayFile bug (see TestParseDayFile_SubtasksBug).
 	todo := &Todo{
 		ID: "abc123", Text: "Round trip test",
-		Source: "api", Status: "today", Created: created,
+		Source: "api", Status: "active", Created: created,
 		Urgent: true, Important: true, StaleCount: 5,
 		Tags:     []string{"homelab", "minecraft"},
 		Notes:    []string{"important note"},
@@ -1192,7 +1193,7 @@ func TestStore_AddTodo_ReadDay_FileRoundTrip(t *testing.T) {
 	if got.Source != "api" {
 		t.Errorf("Source = %q", got.Source)
 	}
-	if got.Status != "today" {
+	if got.Status != "active" {
 		t.Errorf("Status = %q", got.Status)
 	}
 	if !got.Urgent || !got.Important {
@@ -1843,7 +1844,7 @@ func TestLogger_AppendToExistingLog(t *testing.T) {
 	logger.LogDelete("2026-03-10", "aaa111")
 
 	// Append more
-	logger.LogStatusChange("2026-03-10", "bbb222", "inbox", "today")
+	logger.LogStatusChange("2026-03-10", "bbb222", "inbox", "active")
 
 	data, err := os.ReadFile(filepath.Join(dir, "2026-03-10.log"))
 	if err != nil {
@@ -2046,5 +2047,543 @@ func TestStore_WriteDay_ReadOnlyDir(t *testing.T) {
 	err := store.WriteDay("2026-03-10", []*Todo{todo})
 	if err == nil {
 		t.Error("expected error writing to read-only directory, got nil")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// StatusChanged field tests
+// ---------------------------------------------------------------------------
+
+func TestParseTodoLine_WithStatusChanged(t *testing.T) {
+	// Parsing a line that includes {status_changed:...} should populate the field.
+	line := `- [ ] Do thing {id:aaa111} {source:cli} {status:inbox} {created:2026-03-22T14:00:00} {urgent:no} {important:no} {stale_count:0} {status_changed:2026-03-22T14:00:00} #work`
+	todo, err := ParseTodoLine(line)
+	if err != nil {
+		t.Fatalf("ParseTodoLine error: %v", err)
+	}
+	expected := time.Date(2026, 3, 22, 14, 0, 0, 0, time.UTC)
+	if !todo.StatusChanged.Equal(expected) {
+		t.Errorf("StatusChanged = %v, want %v", todo.StatusChanged, expected)
+	}
+}
+
+func TestParseTodoLine_WithoutStatusChanged_ZeroValue(t *testing.T) {
+	// Backward compat: lines without status_changed should have zero time.
+	line := `- [ ] Old task {id:bbb222} {source:cli} {status:inbox} {created:2026-03-10T09:00:00} {urgent:no} {important:no} {stale_count:0} #work`
+	todo, err := ParseTodoLine(line)
+	if err != nil {
+		t.Fatalf("ParseTodoLine error: %v", err)
+	}
+	if !todo.StatusChanged.IsZero() {
+		t.Errorf("StatusChanged should be zero for legacy lines, got %v", todo.StatusChanged)
+	}
+}
+
+func TestToMarkdown_WithStatusChanged_IncludesField(t *testing.T) {
+	sc := time.Date(2026, 3, 22, 15, 30, 0, 0, time.UTC)
+	todo := &Todo{
+		ID: "aaa111", Text: "test", Source: "cli", Status: "active",
+		Created: time.Date(2026, 3, 22, 14, 0, 0, 0, time.UTC),
+		StatusChanged: sc, Tags: []string{"work"},
+	}
+	md := todo.ToMarkdown()
+	if !strings.Contains(md, "{status_changed:2026-03-22T15:30:00}") {
+		t.Errorf("ToMarkdown should include status_changed when non-zero, got: %s", md)
+	}
+}
+
+func TestToMarkdown_WithZeroStatusChanged_OmitsField(t *testing.T) {
+	todo := &Todo{
+		ID: "aaa111", Text: "test", Source: "cli", Status: "inbox",
+		Created: time.Date(2026, 3, 22, 14, 0, 0, 0, time.UTC),
+		Tags: []string{"work"},
+	}
+	md := todo.ToMarkdown()
+	if strings.Contains(md, "status_changed") {
+		t.Errorf("ToMarkdown should omit status_changed when zero, got: %s", md)
+	}
+}
+
+func TestStatusChanged_RoundTrip(t *testing.T) {
+	// Round-trip: todo with StatusChanged -> ToMarkdown -> ParseTodoLine -> same value
+	sc := time.Date(2026, 3, 22, 16, 45, 0, 0, time.UTC)
+	todo := &Todo{
+		ID: "abc123", Text: "Round trip status changed", Source: "cli", Status: "active",
+		Created: time.Date(2026, 3, 22, 14, 0, 0, 0, time.UTC),
+		StatusChanged: sc, Tags: []string{"homelab"},
+	}
+	md := todo.ToMarkdown()
+	lines := strings.Split(md, "\n")
+	parsed, err := ParseTodoLine(lines[0])
+	if err != nil {
+		t.Fatalf("ParseTodoLine error: %v", err)
+	}
+	if !parsed.StatusChanged.Equal(sc) {
+		t.Errorf("StatusChanged round-trip failed: got %v, want %v", parsed.StatusChanged, sc)
+	}
+}
+
+func TestParseTodoLine_LegacyTodayStatus_NormalizedToActive(t *testing.T) {
+	// Backward compat: {status:today} in old files should be read as "active"
+	line := `- [ ] Legacy task {id:aaa111} {source:cli} {status:today} {created:2026-03-10T09:00:00} {urgent:no} {important:no} {stale_count:0} #work`
+	todo, err := ParseTodoLine(line)
+	if err != nil {
+		t.Fatalf("ParseTodoLine error: %v", err)
+	}
+	if todo.Status != "active" {
+		t.Errorf("Status = %q, want 'active' (normalized from 'today')", todo.Status)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Dual stale timeout tests
+// ---------------------------------------------------------------------------
+
+func TestFindStaleItems_InboxOlderThan7Days(t *testing.T) {
+	dir := t.TempDir()
+	store := NewStore(dir)
+	oldDate := time.Now().AddDate(0, 0, -8)
+
+	todo := newTestTodo("aaa111", "Old inbox item", "inbox", oldDate)
+	if err := store.AddTodo(todo); err != nil {
+		t.Fatal(err)
+	}
+
+	stales, err := FindStaleItems(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stales) != 1 {
+		t.Errorf("expected 1 stale item (inbox 8 days old), got %d", len(stales))
+	}
+}
+
+func TestFindStaleItems_InboxYoungerThan7Days_NotStale(t *testing.T) {
+	dir := t.TempDir()
+	store := NewStore(dir)
+	recentDate := time.Now().AddDate(0, 0, -6)
+
+	todo := newTestTodo("aaa111", "Recent inbox", "inbox", recentDate)
+	if err := store.AddTodo(todo); err != nil {
+		t.Fatal(err)
+	}
+
+	stales, err := FindStaleItems(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stales) != 0 {
+		t.Errorf("expected 0 stale items (inbox 6 days old), got %d", len(stales))
+	}
+}
+
+func TestFindStaleItems_InboxExactly7Days_NotStale(t *testing.T) {
+	dir := t.TempDir()
+	store := NewStore(dir)
+	// Exactly 7 days ago should NOT be stale (strictly more than 7)
+	exactDate := time.Now().AddDate(0, 0, -7)
+
+	todo := newTestTodo("aaa111", "Exact 7 day inbox", "inbox", exactDate)
+	if err := store.AddTodo(todo); err != nil {
+		t.Fatal(err)
+	}
+
+	stales, err := FindStaleItems(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stales) != 0 {
+		t.Errorf("expected 0 stale items (inbox exactly 7 days), got %d", len(stales))
+	}
+}
+
+func TestFindStaleItems_ActiveOlderThan24Hours(t *testing.T) {
+	dir := t.TempDir()
+	store := NewStore(dir)
+	// Use UTC times since the store round-trip strips timezone info and parses as UTC
+	now := time.Now().UTC()
+	created := now.AddDate(0, 0, -2)
+	statusChanged := now.Add(-25 * time.Hour)
+
+	todo := newTestTodo("aaa111", "Old active item", "active", created)
+	todo.StatusChanged = statusChanged
+	if err := store.AddTodo(todo); err != nil {
+		t.Fatal(err)
+	}
+
+	stales, err := FindStaleItems(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stales) != 1 {
+		t.Errorf("expected 1 stale item (active, StatusChanged 25h ago), got %d", len(stales))
+	}
+}
+
+func TestFindStaleItems_ActiveYoungerThan24Hours_NotStale(t *testing.T) {
+	dir := t.TempDir()
+	store := NewStore(dir)
+	// Use UTC since store round-trip strips timezone info
+	created := time.Now().UTC().AddDate(0, 0, -2)
+	statusChanged := time.Now().UTC().Add(-23 * time.Hour)
+
+	todo := newTestTodo("aaa111", "Fresh active item", "active", created)
+	todo.StatusChanged = statusChanged
+	if err := store.AddTodo(todo); err != nil {
+		t.Fatal(err)
+	}
+
+	stales, err := FindStaleItems(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stales) != 0 {
+		t.Errorf("expected 0 stale items (active, StatusChanged 23h ago), got %d", len(stales))
+	}
+}
+
+func TestFindStaleItems_ActiveExactly24Hours_NotStale(t *testing.T) {
+	dir := t.TempDir()
+	store := NewStore(dir)
+	// Use UTC since store round-trip strips timezone info.
+	// Use -24h + 1min to stay safely inside the 24h window, because
+	// FindStaleItems computes its own time.Now() slightly after this,
+	// and the store round-trip truncates to seconds.
+	created := time.Now().UTC().AddDate(0, 0, -2)
+	statusChanged := time.Now().UTC().Add(-24*time.Hour + 1*time.Minute)
+
+	todo := newTestTodo("aaa111", "Just under 24h active", "active", created)
+	todo.StatusChanged = statusChanged
+	if err := store.AddTodo(todo); err != nil {
+		t.Fatal(err)
+	}
+
+	stales, err := FindStaleItems(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stales) != 0 {
+		t.Errorf("expected 0 stale items (active, StatusChanged just under 24h), got %d", len(stales))
+	}
+}
+
+func TestFindStaleItems_ActiveZeroStatusChanged_FallsBackToCreated(t *testing.T) {
+	dir := t.TempDir()
+	store := NewStore(dir)
+	// Created 25 hours ago, no StatusChanged set
+	// Use UTC since store round-trip strips timezone info
+	created := time.Now().UTC().Add(-25 * time.Hour)
+
+	todo := newTestTodo("aaa111", "Active no sc", "active", created)
+	// StatusChanged is zero (default)
+	if err := store.AddTodo(todo); err != nil {
+		t.Fatal(err)
+	}
+
+	stales, err := FindStaleItems(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stales) != 1 {
+		t.Errorf("expected 1 stale item (active, zero StatusChanged, Created 25h ago), got %d", len(stales))
+	}
+}
+
+func TestFindStaleItems_MixedStore(t *testing.T) {
+	dir := t.TempDir()
+	store := NewStore(dir)
+
+	// Use UTC since store round-trip strips timezone info
+	now := time.Now().UTC()
+	oldCreated := now.AddDate(0, 0, -10)
+	recentCreated := now.AddDate(0, 0, -1)
+	oldSC := now.Add(-25 * time.Hour)
+	recentSC := now.Add(-1 * time.Hour)
+
+	// Stale inbox (10 days old)
+	staleInbox := newTestTodo("aaa111", "Stale inbox", "inbox", oldCreated)
+	// Stale active (StatusChanged 25h ago)
+	staleActive := newTestTodo("bbb222", "Stale active", "active", recentCreated)
+	staleActive.StatusChanged = oldSC
+	// Fresh inbox (1 day old)
+	freshInbox := newTestTodo("ccc333", "Fresh inbox", "inbox", recentCreated)
+	// Fresh active (StatusChanged 1h ago)
+	freshActive := newTestTodo("ddd444", "Fresh active", "active", recentCreated)
+	freshActive.StatusChanged = recentSC
+
+	for _, todo := range []*Todo{staleInbox, staleActive, freshInbox, freshActive} {
+		if err := store.AddTodo(todo); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	stales, err := FindStaleItems(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stales) != 2 {
+		t.Errorf("expected 2 stale items (1 inbox + 1 active), got %d", len(stales))
+	}
+	// Verify correct IDs
+	staleIDs := map[string]bool{}
+	for _, s := range stales {
+		staleIDs[s.ID] = true
+	}
+	if !staleIDs["aaa111"] {
+		t.Error("stale inbox aaa111 not found in stale items")
+	}
+	if !staleIDs["bbb222"] {
+		t.Error("stale active bbb222 not found in stale items")
+	}
+}
+
+func TestFindStaleItems_NonEligibleStatuses_NeverReturned(t *testing.T) {
+	dir := t.TempDir()
+	store := NewStore(dir)
+	oldDate := time.Now().AddDate(0, 0, -30)
+
+	statuses := []string{"done", "stale", "waiting", "unprocessed"}
+	for i, status := range statuses {
+		todo := newTestTodo(fmt.Sprintf("t%d", i), "Old "+status, status, oldDate)
+		if err := store.AddTodo(todo); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	stales, err := FindStaleItems(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stales) != 0 {
+		t.Errorf("expected 0 stale items for done/stale/waiting/unprocessed, got %d", len(stales))
+	}
+}
+
+func TestFindStaleItems_EmptyStore(t *testing.T) {
+	dir := t.TempDir()
+	store := NewStore(dir)
+
+	stales, err := FindStaleItems(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stales) != 0 {
+		t.Errorf("expected empty slice for empty store, got %d", len(stales))
+	}
+}
+
+func TestMarkStale_SetsStatusAndStatusChanged(t *testing.T) {
+	dir := t.TempDir()
+	store := NewStore(dir)
+	logger := NewLogger(dir)
+	created := time.Now().Add(-25 * time.Hour)
+
+	todo := newTestTodo("aaa111", "Active task", "active", created)
+	if err := store.AddTodo(todo); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := MarkStale(store, logger, todo); err != nil {
+		t.Fatal(err)
+	}
+
+	found, _, err := store.FindTodoByID("aaa111")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found.Status != "stale" {
+		t.Errorf("Status = %q, want stale", found.Status)
+	}
+	if found.StatusChanged.IsZero() {
+		t.Error("StatusChanged should be set after MarkStale")
+	}
+}
+
+func TestReviveTodo_SetsInboxAndIncrementsStaleCount(t *testing.T) {
+	dir := t.TempDir()
+	store := NewStore(dir)
+	logger := NewLogger(dir)
+	created := time.Now().AddDate(0, 0, -10)
+
+	todo := newTestTodo("aaa111", "Stale task", "stale", created)
+	todo.StaleCount = 1
+	if err := store.AddTodo(todo); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ReviveTodo(store, logger, todo); err != nil {
+		t.Fatal(err)
+	}
+
+	found, _, err := store.FindTodoByID("aaa111")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found.Status != "inbox" {
+		t.Errorf("Status = %q, want inbox", found.Status)
+	}
+	if found.StaleCount != 2 {
+		t.Errorf("StaleCount = %d, want 2", found.StaleCount)
+	}
+	if found.StatusChanged.IsZero() {
+		t.Error("StatusChanged should be set after ReviveTodo")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// InfoLine + Active Count tests
+// ---------------------------------------------------------------------------
+
+func TestGetInfoLine_NoActiveItems(t *testing.T) {
+	dir := t.TempDir()
+	store := NewStore(dir)
+
+	todo := newTestTodo("aaa111", "Inbox item", "inbox", time.Now())
+	if err := store.AddTodo(todo); err != nil {
+		t.Fatal(err)
+	}
+
+	info, err := GetInfoLine(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Active != 0 {
+		t.Errorf("Active = %d, want 0", info.Active)
+	}
+}
+
+func TestGetInfoLine_CountsActiveAcrossDays(t *testing.T) {
+	dir := t.TempDir()
+	store := NewStore(dir)
+
+	dates := []time.Time{
+		time.Date(2026, 3, 20, 10, 0, 0, 0, time.Local),
+		time.Date(2026, 3, 21, 10, 0, 0, 0, time.Local),
+		time.Date(2026, 3, 22, 10, 0, 0, 0, time.Local),
+	}
+	for i, d := range dates {
+		todo := newTestTodo(fmt.Sprintf("a%d", i), "Active task", "active", d)
+		if err := store.AddTodo(todo); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	info, err := GetInfoLine(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Active != 3 {
+		t.Errorf("Active = %d, want 3", info.Active)
+	}
+}
+
+func TestGetInfoLine_ActiveIndependentFromOtherCounts(t *testing.T) {
+	dir := t.TempDir()
+	store := NewStore(dir)
+	now := time.Now()
+
+	// 1 active, 1 unprocessed, 1 looping (stale_count >= 2)
+	active := newTestTodo("aaa111", "Active", "active", now)
+	unproc := newTestTodo("bbb222", "Unprocessed", "unprocessed", now)
+	looping := newTestTodo("ccc333", "Looping", "inbox", now)
+	looping.StaleCount = 3
+
+	for _, todo := range []*Todo{active, unproc, looping} {
+		if err := store.AddTodo(todo); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	info, err := GetInfoLine(store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Active != 1 {
+		t.Errorf("Active = %d, want 1", info.Active)
+	}
+	if info.Unprocessed != 1 {
+		t.Errorf("Unprocessed = %d, want 1", info.Unprocessed)
+	}
+	if info.Looping != 1 {
+		t.Errorf("Looping = %d, want 1", info.Looping)
+	}
+}
+
+func TestFormatInfoLine_AllZeros_EmptyString(t *testing.T) {
+	result := FormatInfoLine(InfoLine{})
+	if result != "" {
+		t.Errorf("FormatInfoLine with all zeros should be empty, got %q", result)
+	}
+}
+
+func TestFormatInfoLine_WithActive_ContainsActiveText(t *testing.T) {
+	result := FormatInfoLine(InfoLine{Active: 2})
+	if result == "" {
+		t.Fatal("FormatInfoLine with Active > 0 should not be empty")
+	}
+	if !strings.Contains(strings.ToLower(result), "active") {
+		t.Errorf("FormatInfoLine output should contain 'active', got %q", result)
+	}
+}
+
+func TestFormatInfoLine_NoEmoji(t *testing.T) {
+	// Test with all fields populated to maximize coverage
+	result := FormatInfoLine(InfoLine{Unprocessed: 5, Looping: 2, Active: 3})
+	for i, b := range []byte(result) {
+		if b >= 0xF0 && b <= 0xF4 {
+			t.Errorf("FormatInfoLine contains emoji byte 0x%02X at position %d: %q", b, i, result)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Stale lifecycle (end-to-end)
+// ---------------------------------------------------------------------------
+
+func TestStaleLifecycle_ActiveToStaleToRevive(t *testing.T) {
+	dir := t.TempDir()
+	store := NewStore(dir)
+	logger := NewLogger(dir)
+
+	// Create an active todo with StatusChanged 25h in the past
+	// Use UTC since store round-trip strips timezone info
+	created := time.Now().UTC().AddDate(0, 0, -2)
+	todo := newTestTodo("aaa111", "Active task", "active", created)
+	todo.StatusChanged = time.Now().UTC().Add(-25 * time.Hour)
+	if err := store.AddTodo(todo); err != nil {
+		t.Fatal(err)
+	}
+
+	// Run stale check
+	count, err := RunStaleCheck(store, logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Errorf("RunStaleCheck count = %d, want 1", count)
+	}
+
+	found, _, err := store.FindTodoByID("aaa111")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found.Status != "stale" {
+		t.Errorf("Status after stale check = %q, want stale", found.Status)
+	}
+
+	// Revive
+	if err := ReviveTodo(store, logger, found); err != nil {
+		t.Fatal(err)
+	}
+
+	revived, _, err := store.FindTodoByID("aaa111")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if revived.Status != "inbox" {
+		t.Errorf("Status after revive = %q, want inbox", revived.Status)
+	}
+	if revived.StaleCount != 1 {
+		t.Errorf("StaleCount after revive = %d, want 1", revived.StaleCount)
 	}
 }

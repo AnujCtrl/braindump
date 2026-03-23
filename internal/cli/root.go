@@ -20,6 +20,7 @@ var (
 var reservedNames = map[string]bool{
 	"ls": true, "done": true, "edit": true, "delete": true,
 	"move": true, "dump": true, "tag": true, "stale": true, "looping": true,
+	"print": true,
 }
 
 var RootCmd = &cobra.Command{

@@ -466,7 +466,7 @@ func TestChangeStatusToToday(t *testing.T) {
 	id := createTodo(t, server.URL, "promote me", nil)
 
 	resp := patchJSON(t, server.URL+"/api/todo/"+id+"/status", map[string]string{
-		"status": "today",
+		"status": "active",
 	})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
@@ -475,8 +475,8 @@ func TestChangeStatusToToday(t *testing.T) {
 	var result map[string]interface{}
 	readJSON(t, resp, &result)
 
-	if result["status"] != "today" {
-		t.Errorf("expected status 'today', got %q", result["status"])
+	if result["status"] != "active" {
+		t.Errorf("expected status 'active', got %q", result["status"])
 	}
 }
 
@@ -741,7 +741,7 @@ func TestChangeStatusNonExistentID(t *testing.T) {
 	server, _ := setupTestAPI(t)
 
 	resp := patchJSON(t, server.URL+"/api/todo/zzz999/status", map[string]string{
-		"status": "today",
+		"status": "active",
 	})
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("expected 404, got %d", resp.StatusCode)
@@ -1132,5 +1132,64 @@ func TestDeleteThenListExcludes(t *testing.T) {
 	}
 	if result[0]["id"] != id1 {
 		t.Errorf("expected surviving todo %s, got %s", id1, result[0]["id"])
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Active status tests
+// ---------------------------------------------------------------------------
+
+func TestChangeStatusToActive(t *testing.T) {
+	server, _ := setupTestAPI(t)
+
+	id := createTodo(t, server.URL, "activate me", nil)
+
+	resp := patchJSON(t, server.URL+"/api/todo/"+id+"/status", map[string]string{
+		"status": "active",
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var result map[string]interface{}
+	readJSON(t, resp, &result)
+
+	if result["status"] != "active" {
+		t.Errorf("expected status 'active', got %q", result["status"])
+	}
+}
+
+func TestInfoEndpoint_IncludesActiveCount(t *testing.T) {
+	server, _ := setupTestAPI(t)
+
+	// Create two todos and move them to active
+	id1 := createTodo(t, server.URL, "active task one", nil)
+	id2 := createTodo(t, server.URL, "active task two", nil)
+
+	for _, id := range []string{id1, id2} {
+		resp := patchJSON(t, server.URL+"/api/todo/"+id+"/status", map[string]string{
+			"status": "active",
+		})
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("failed to set active for %s: status %d", id, resp.StatusCode)
+		}
+		resp.Body.Close()
+	}
+
+	infoResp, err := http.Get(server.URL + "/api/info")
+	if err != nil {
+		t.Fatalf("GET /api/info: %v", err)
+	}
+
+	var result map[string]interface{}
+	readJSON(t, infoResp, &result)
+
+	// The info endpoint should include an "active" key
+	activeVal, ok := result["active"]
+	if !ok {
+		t.Fatal("info response missing 'active' key")
+	}
+	if activeVal.(float64) != 2 {
+		t.Errorf("expected active=2, got %v", activeVal)
 	}
 }

@@ -85,7 +85,7 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 var validStatuses = map[string]bool{
 	"unprocessed": true,
 	"inbox":       true,
-	"today":       true,
+	"active":      true,
 	"waiting":     true,
 	"done":        true,
 	"stale":       true,
@@ -413,6 +413,7 @@ func (h *Handlers) Info(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]int{
 		"unprocessed": info.Unprocessed,
 		"looping":     info.Looping,
+		"active":      info.Active,
 	})
 }
 
