@@ -124,15 +124,16 @@ func runCapture(cmd *cobra.Command, args []string) error {
 	now := time.Now()
 
 	todo := &core.Todo{
-		ID:        id,
-		Text:      text,
-		Source:    source,
-		Status:    "inbox",
-		Created:   now,
-		Urgent:    urgent,
-		Important: important,
-		Tags:      tags,
-		Done:      false,
+		ID:            id,
+		Text:          text,
+		Source:        source,
+		Status:        "inbox",
+		Created:       now,
+		StatusChanged: now,
+		Urgent:        urgent,
+		Important:     important,
+		Tags:          tags,
+		Done:          false,
 	}
 
 	if note != "" {

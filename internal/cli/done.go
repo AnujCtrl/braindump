@@ -38,6 +38,7 @@ func markDoneByID(id string) error {
 
 	oldStatus := todo.Status
 	todo.Status = "done"
+	todo.StatusChanged = time.Now()
 	todo.Done = true
 
 	if err := store.UpdateTodo(todo); err != nil {
@@ -94,6 +95,7 @@ func markDoneInteractive() error {
 	selected := open[num-1]
 	oldStatus := selected.todo.Status
 	selected.todo.Status = "done"
+	selected.todo.StatusChanged = time.Now()
 	selected.todo.Done = true
 
 	if err := store.UpdateTodo(selected.todo); err != nil {

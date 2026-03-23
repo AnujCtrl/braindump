@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -40,6 +41,7 @@ var moveCmd = &cobra.Command{
 
 		oldStatus := todo.Status
 		todo.Status = newStatus
+		todo.StatusChanged = time.Now()
 
 		if newStatus == "done" {
 			todo.Done = true

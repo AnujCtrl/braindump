@@ -142,15 +142,16 @@ func (h *Handlers) CreateTodo(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now()
 	todo := &core.Todo{
-		ID:        id,
-		Text:      req.Text,
-		Source:    source,
-		Status:    "inbox",
-		Created:   now,
-		Urgent:    req.Urgent,
-		Important: req.Important,
-		Tags:      req.Tags,
-		Done:      false,
+		ID:            id,
+		Text:          req.Text,
+		Source:        source,
+		Status:        "inbox",
+		Created:       now,
+		StatusChanged: now,
+		Urgent:        req.Urgent,
+		Important:     req.Important,
+		Tags:          req.Tags,
+		Done:          false,
 	}
 
 	if req.Note != "" {
@@ -315,6 +316,7 @@ func (h *Handlers) ChangeStatus(w http.ResponseWriter, r *http.Request, id strin
 
 	oldStatus := todo.Status
 	todo.Status = req.Status
+	todo.StatusChanged = time.Now()
 
 	if req.Status == "done" {
 		todo.Done = true
