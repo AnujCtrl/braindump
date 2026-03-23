@@ -60,7 +60,7 @@ separator = "--"                        (everything after is text)
 ### State change log (`/data/YYYY-MM-DD.log`)
 ```
 2026-03-21T14:32:00 a1b2c3 created source=cli tags=homelab text="Fix server"
-2026-03-21T15:00:00 a1b2c3 status inbox->today
+2026-03-21T15:00:00 a1b2c3 status inbox->active
 ```
 - Log lives in the **creation date's** log file
 - Only created when there's activity
@@ -73,17 +73,18 @@ separator = "--"                        (everything after is text)
 ## Status Model
 
 ```
-Regular:  inbox → today → done
-                → stale (7 days untouched) → revive → inbox (stale_count++)
+Regular:  inbox → active (printed) → done
+                  active stale after 24h, inbox stale after 7d
+                → stale → revive → inbox (stale_count++)
 Dump:     unprocessed → inbox → (same flow)
 ```
 
-Statuses: `unprocessed`, `inbox`, `today`, `waiting`, `done`, `stale`
+Statuses: `unprocessed`, `inbox`, `active`, `waiting`, `done`, `stale`
 
 ## Key Design Decisions
 
 - **Capture-first**: Default action is capture, no subcommand needed
-- **No smart parsing**: Reserved subcommand words (`ls`, `done`, `edit`, `delete`, `move`, `dump`, `tag`, `stale`, `looping`) always trigger their function
+- **No smart parsing**: Reserved subcommand words (`ls`, `done`, `edit`, `delete`, `move`, `dump`, `tag`, `stale`, `looping`, `print`) always trigger their function
 - **Use `--` separator** to capture text starting with a reserved word: `todo -- dump the drives`
-- **Info line** shown after every CLI command (unprocessed count, looping count)
+- **Info line** shown after every CLI command (unprocessed count, active count, looping count)
 - **tags.yaml** is the source of truth for valid tags

@@ -1,5 +1,10 @@
 package printer
 
+import (
+	"fmt"
+	"os"
+)
+
 // ESC/POS command constants for thermal receipt printers.
 var (
 	CmdInit    = []byte{0x1b, 0x40}
@@ -33,3 +38,40 @@ func (b *BufferPrinter) Print(data []byte) error {
 }
 
 func (b *BufferPrinter) Available() bool { return true }
+
+// ESCPOSPrinter sends raw bytes to a thermal receipt printer via a device file.
+type ESCPOSPrinter struct {
+	DevicePath string
+}
+
+// Available checks if the device file exists and is writable.
+func (p *ESCPOSPrinter) Available() bool {
+	info, err := os.Stat(p.DevicePath)
+	if err != nil {
+		return false
+	}
+	// Check it's not a directory and attempt open for write
+	if info.IsDir() {
+		return false
+	}
+	f, err := os.OpenFile(p.DevicePath, os.O_WRONLY, 0)
+	if err != nil {
+		return false
+	}
+	f.Close()
+	return true
+}
+
+// Print writes raw ESC/POS bytes to the device file.
+func (p *ESCPOSPrinter) Print(data []byte) error {
+	f, err := os.OpenFile(p.DevicePath, os.O_WRONLY, 0)
+	if err != nil {
+		return fmt.Errorf("open printer device: %w", err)
+	}
+	defer f.Close()
+	_, err = f.Write(data)
+	if err != nil {
+		return fmt.Errorf("write to printer: %w", err)
+	}
+	return nil
+}

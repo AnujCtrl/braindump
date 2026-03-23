@@ -2,6 +2,8 @@ package printer
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -83,5 +85,33 @@ func TestBufferPrinter_Available_ReturnsTrue(t *testing.T) {
 	p := &BufferPrinter{}
 	if !p.Available() {
 		t.Error("BufferPrinter.Available() should return true")
+	}
+}
+
+func TestESCPOSPrinter_Available_NonExistentDevice(t *testing.T) {
+	p := &ESCPOSPrinter{DevicePath: "/dev/nonexistent_printer_device_xyz"}
+	if p.Available() {
+		t.Error("ESCPOSPrinter.Available() should return false for non-existent device")
+	}
+}
+
+func TestESCPOSPrinter_Available_NonWritableDevice(t *testing.T) {
+	// Create a read-only file to simulate non-writable device
+	dir := t.TempDir()
+	path := filepath.Join(dir, "readonly")
+	if err := os.WriteFile(path, []byte{}, 0444); err != nil {
+		t.Fatal(err)
+	}
+	p := &ESCPOSPrinter{DevicePath: path}
+	if p.Available() {
+		t.Error("ESCPOSPrinter.Available() should return false for non-writable device")
+	}
+}
+
+func TestESCPOSPrinter_Print_NonExistentDevice(t *testing.T) {
+	p := &ESCPOSPrinter{DevicePath: "/dev/nonexistent_printer_device_xyz"}
+	err := p.Print([]byte("test"))
+	if err == nil {
+		t.Error("ESCPOSPrinter.Print() should return error for non-existent device")
 	}
 }

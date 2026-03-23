@@ -113,22 +113,48 @@ func FormatReceipt(todo *core.Todo, streak int) []byte {
 }
 
 // wordWrap splits text into lines no wider than maxWidth characters.
+// Words longer than maxWidth are split at the character boundary.
 func wordWrap(text string, maxWidth int) []string {
 	words := strings.Fields(text)
 	if len(words) == 0 {
 		return []string{text}
 	}
+
+	// splitLong breaks a single word into chunks of at most maxWidth chars.
+	splitLong := func(word string) []string {
+		if len(word) <= maxWidth {
+			return []string{word}
+		}
+		var chunks []string
+		for len(word) > maxWidth {
+			chunks = append(chunks, word[:maxWidth])
+			word = word[maxWidth:]
+		}
+		if len(word) > 0 {
+			chunks = append(chunks, word)
+		}
+		return chunks
+	}
+
 	var lines []string
-	current := words[0]
-	for _, word := range words[1:] {
-		if len(current)+1+len(word) <= maxWidth {
-			current += " " + word
-		} else {
-			lines = append(lines, current)
-			current = word
+	current := ""
+
+	for _, word := range words {
+		parts := splitLong(word)
+		for _, part := range parts {
+			if current == "" {
+				current = part
+			} else if len(current)+1+len(part) <= maxWidth {
+				current += " " + part
+			} else {
+				lines = append(lines, current)
+				current = part
+			}
 		}
 	}
-	lines = append(lines, current)
+	if current != "" {
+		lines = append(lines, current)
+	}
 	return lines
 }
 
