@@ -4,7 +4,7 @@
 
 set -e
 
-RULE='SUBSYSTEM=="usb", ATTR{idVendor}=="0456", ATTR{idProduct}=="0808", MODE="0666"'
+RULE='SUBSYSTEM=="usbmisc", ATTRS{idVendor}=="0456", ATTRS{idProduct}=="0808", MODE="0666"'
 RULE_FILE="/etc/udev/rules.d/99-braindump-printer.rules"
 
 echo "Creating udev rule at $RULE_FILE"

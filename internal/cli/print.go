@@ -80,9 +80,29 @@ func runPrint(cmd *cobra.Command, args []string) error {
 	var p printer.Printer = &printer.ESCPOSPrinter{DevicePath: cfg.DevicePath}
 
 	if cfg.Enabled && p.Available() {
-		receipt := printer.FormatReceipt(selected.todo, 0)
-		if err := p.Print(receipt); err != nil {
-			fmt.Printf("!! Print failed: %v (marked active without printing)\n", err)
+		var receipt []byte
+		var debugContent string
+		if cfg.Mode == "escpos" {
+			var script string
+			var encErr error
+			receipt, script, encErr = printer.FormatReceipt(selected.todo, 0, cfg.EncoderScript, cfg.Width)
+			if encErr != nil {
+				fmt.Printf("!! ESC/POS encode failed: %v, falling back to plain\n", encErr)
+				receipt = printer.FormatPlainReceipt(selected.todo, 0, cfg.Width)
+				debugContent = string(receipt)
+			} else {
+				debugContent = script
+			}
+		} else {
+			receipt = printer.FormatPlainReceipt(selected.todo, 0, cfg.Width)
+			debugContent = string(receipt)
+		}
+		printErr := p.Print(receipt)
+		if logErr := printer.LogPrintDebug(dataDir, selected.todo.ID, "cli", cfg.Mode, cfg.DevicePath, debugContent, printErr); logErr != nil {
+			fmt.Printf("!! Debug log failed: %v\n", logErr)
+		}
+		if printErr != nil {
+			fmt.Printf("!! Print failed: %v (marked active without printing)\n", printErr)
 		} else {
 			fmt.Printf(">>> Printed receipt for [%s] %s\n", selected.todo.ID, selected.todo.Text)
 		}

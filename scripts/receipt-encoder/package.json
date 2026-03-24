@@ -1,0 +1,7 @@
+{
+  "name": "receipt-encoder",
+  "private": true,
+  "dependencies": {
+    "esc-pos-encoder": "^3"
+  }
+}

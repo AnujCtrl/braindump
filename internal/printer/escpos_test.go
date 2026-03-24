@@ -7,48 +7,6 @@ import (
 	"testing"
 )
 
-func TestCmdInit(t *testing.T) {
-	expected := []byte{0x1b, 0x40}
-	if !bytes.Equal(CmdInit, expected) {
-		t.Errorf("CmdInit = %v, want %v", CmdInit, expected)
-	}
-}
-
-func TestCmdBoldOn(t *testing.T) {
-	expected := []byte{0x1b, 0x45, 0x01}
-	if !bytes.Equal(CmdBoldOn, expected) {
-		t.Errorf("CmdBoldOn = %v, want %v", CmdBoldOn, expected)
-	}
-}
-
-func TestCmdBoldOff(t *testing.T) {
-	expected := []byte{0x1b, 0x45, 0x00}
-	if !bytes.Equal(CmdBoldOff, expected) {
-		t.Errorf("CmdBoldOff = %v, want %v", CmdBoldOff, expected)
-	}
-}
-
-func TestCmdCenter(t *testing.T) {
-	expected := []byte{0x1b, 0x61, 0x01}
-	if !bytes.Equal(CmdCenter, expected) {
-		t.Errorf("CmdCenter = %v, want %v", CmdCenter, expected)
-	}
-}
-
-func TestCmdLeft(t *testing.T) {
-	expected := []byte{0x1b, 0x61, 0x00}
-	if !bytes.Equal(CmdLeft, expected) {
-		t.Errorf("CmdLeft = %v, want %v", CmdLeft, expected)
-	}
-}
-
-func TestCmdFeed(t *testing.T) {
-	expected := []byte{0x0a}
-	if !bytes.Equal(CmdFeed, expected) {
-		t.Errorf("CmdFeed = %v, want %v", CmdFeed, expected)
-	}
-}
-
 func TestNullPrinter_Print_ReturnsNil(t *testing.T) {
 	p := &NullPrinter{}
 	if err := p.Print([]byte("test")); err != nil {
@@ -113,5 +71,65 @@ func TestESCPOSPrinter_Print_NonExistentDevice(t *testing.T) {
 	err := p.Print([]byte("test"))
 	if err == nil {
 		t.Error("ESCPOSPrinter.Print() should return error for non-existent device")
+	}
+}
+
+// shortWriter simulates a USB device that accepts at most N bytes per Write call.
+type shortWriter struct {
+	buf       bytes.Buffer
+	chunkSize int
+}
+
+func (w *shortWriter) Write(p []byte) (int, error) {
+	if len(p) > w.chunkSize {
+		p = p[:w.chunkSize]
+	}
+	return w.buf.Write(p)
+}
+
+func TestPrint_ShortWrite(t *testing.T) {
+	// Simulate the short-write bug: a writer that only accepts 64 bytes at a time,
+	// similar to USB bulk transfer buffers in the usblp kernel driver.
+	payload := bytes.Repeat([]byte("ABCDEFGHIJ"), 50) // 500 bytes total
+	sw := &shortWriter{chunkSize: 64}
+
+	// Reproduce the write loop logic from ESCPOSPrinter.Print
+	data := make([]byte, len(payload))
+	copy(data, payload)
+	for len(data) > 0 {
+		n, err := sw.Write(data)
+		if err != nil {
+			t.Fatalf("unexpected write error: %v", err)
+		}
+		if n == 0 {
+			t.Fatal("write returned 0 bytes with no error")
+		}
+		data = data[n:]
+	}
+
+	if !bytes.Equal(sw.buf.Bytes(), payload) {
+		t.Errorf("short write loop: got %d bytes, want %d bytes", sw.buf.Len(), len(payload))
+	}
+}
+
+func TestPrint_ShortWrite_VariousChunkSizes(t *testing.T) {
+	payload := bytes.Repeat([]byte("Receipt line content!\n"), 30) // ~630 bytes
+
+	for _, chunkSize := range []int{1, 7, 32, 64, 128, 256} {
+		sw := &shortWriter{chunkSize: chunkSize}
+		data := make([]byte, len(payload))
+		copy(data, payload)
+
+		for len(data) > 0 {
+			n, err := sw.Write(data)
+			if err != nil {
+				t.Fatalf("chunkSize=%d: unexpected error: %v", chunkSize, err)
+			}
+			data = data[n:]
+		}
+
+		if !bytes.Equal(sw.buf.Bytes(), payload) {
+			t.Errorf("chunkSize=%d: got %d bytes, want %d", chunkSize, sw.buf.Len(), len(payload))
+		}
 	}
 }

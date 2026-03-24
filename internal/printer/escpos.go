@@ -5,16 +5,6 @@ import (
 	"os"
 )
 
-// ESC/POS command constants for thermal receipt printers.
-var (
-	CmdInit    = []byte{0x1b, 0x40}
-	CmdBoldOn  = []byte{0x1b, 0x45, 0x01}
-	CmdBoldOff = []byte{0x1b, 0x45, 0x00}
-	CmdCenter  = []byte{0x1b, 0x61, 0x01}
-	CmdLeft    = []byte{0x1b, 0x61, 0x00}
-	CmdFeed    = []byte{0x0a}
-)
-
 // Printer is the interface for printing raw bytes to a receipt printer.
 type Printer interface {
 	Print(data []byte) error
@@ -63,15 +53,23 @@ func (p *ESCPOSPrinter) Available() bool {
 }
 
 // Print writes raw ESC/POS bytes to the device file.
+// Uses a write loop to handle partial writes from USB bulk transfer buffers.
 func (p *ESCPOSPrinter) Print(data []byte) error {
 	f, err := os.OpenFile(p.DevicePath, os.O_WRONLY, 0)
 	if err != nil {
 		return fmt.Errorf("open printer device: %w", err)
 	}
 	defer f.Close()
-	_, err = f.Write(data)
-	if err != nil {
-		return fmt.Errorf("write to printer: %w", err)
+	// Force blocking I/O — Go's runtime wraps fds with its netpoller
+	// which can interfere with USB character device writes.
+	// Fd() removes the fd from the poller and restores blocking mode.
+	f.Fd()
+	for len(data) > 0 {
+		n, err := f.Write(data)
+		if err != nil {
+			return fmt.Errorf("write to printer: %w", err)
+		}
+		data = data[n:]
 	}
 	return nil
 }

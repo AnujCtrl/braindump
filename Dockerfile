@@ -9,7 +9,9 @@ RUN CGO_ENABLED=0 go build -o /server ./cmd/server/
 
 # Runtime stage
 FROM alpine:3.19
-RUN apk add --no-cache tzdata
+RUN apk add --no-cache tzdata nodejs npm
 COPY --from=builder /todo /usr/local/bin/todo
 COPY --from=builder /server /usr/local/bin/server
+COPY scripts/receipt-encoder/ /app/receipt-encoder/
+RUN cd /app/receipt-encoder && npm install --production
 ENTRYPOINT ["/usr/local/bin/server"]

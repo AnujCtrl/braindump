@@ -27,5 +27,11 @@ go.work.sum
 /data/*
 !/data/tags.yaml.example
 
+# Debug logs
+/data/.debug/
+
+# Node.js
+node_modules/
+
 # Worktrees
 .worktrees/
