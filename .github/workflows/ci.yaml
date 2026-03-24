@@ -19,6 +19,9 @@ jobs:
       - name: Download dependencies
         run: go mod download
 
+      - name: Install Node.js encoder dependencies
+        run: npm ci --prefix scripts/receipt-encoder
+
       - name: Vet
         run: go vet ./...
 
