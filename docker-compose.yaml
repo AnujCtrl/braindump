@@ -16,4 +16,5 @@ services:
     environment:
       - WATCHTOWER_CLEANUP=true
       - WATCHTOWER_POLL_INTERVAL=300
+      - DOCKER_API_VERSION=1.40
     command: todo-todo-1
