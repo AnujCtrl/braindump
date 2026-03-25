@@ -1,1 +1,2 @@
-// HTTP server entrypoint — implementation in Task 9
+export { Handlers } from './handlers.js';
+export { registerRoutes } from './routes.js';
