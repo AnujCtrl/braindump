@@ -10,6 +10,9 @@
 // - WAL mode not being enabled (causes write contention in concurrent access)
 // - Non-idempotent init (crashing on restart when DB already exists)
 
+import { mkdtempSync, rmSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
 import Database from 'better-sqlite3';
 import { initDb } from '../../src/core/db.js';
 
@@ -128,12 +131,20 @@ describe('initDb', () => {
   });
 
   it('enables WAL journal mode', () => {
-    initDb(db);
+    // WAL requires a file-backed database (:memory: always uses 'memory' journal)
+    const tmpDir = mkdtempSync(join(tmpdir(), 'braindump-test-'));
+    const fileDb = new Database(join(tmpDir, 'test.db'));
+    try {
+      initDb(fileDb);
 
-    const result = db.prepare('PRAGMA journal_mode').get() as {
-      journal_mode: string;
-    };
-    expect(result.journal_mode).toBe('wal');
+      const result = fileDb.prepare('PRAGMA journal_mode').get() as {
+        journal_mode: string;
+      };
+      expect(result.journal_mode).toBe('wal');
+    } finally {
+      fileDb.close();
+      rmSync(tmpDir, { recursive: true });
+    }
   });
 
   it('sets todos.id as PRIMARY KEY', () => {
