@@ -1,17 +1,19 @@
-# Build stage
-FROM golang:1.25-alpine AS builder
+# Build stage: install all deps, compile TypeScript
+FROM node:20-alpine AS builder
+RUN apk add --no-cache python3 make g++
 WORKDIR /app
-COPY go.mod go.sum ./
-RUN go mod download
-COPY . .
-RUN CGO_ENABLED=0 go build -o /todo ./cmd/todo/
-RUN CGO_ENABLED=0 go build -o /server ./cmd/server/
+COPY package.json package-lock.json* ./
+RUN npm ci
+COPY tsup.config.ts tsconfig.json ./
+COPY src/ src/
+RUN npm run build
 
-# Runtime stage
-FROM alpine:3.19
-RUN apk add --no-cache tzdata nodejs npm
-COPY --from=builder /todo /usr/local/bin/todo
-COPY --from=builder /server /usr/local/bin/server
-COPY scripts/receipt-encoder/ /app/receipt-encoder/
-RUN cd /app/receipt-encoder && npm install --production
-ENTRYPOINT ["/usr/local/bin/server"]
+# Runtime stage: production deps + compiled output
+FROM node:20-alpine
+RUN apk add --no-cache python3 make g++ tzdata
+WORKDIR /app
+COPY package.json package-lock.json* ./
+RUN npm ci --omit=dev && apk del python3 make g++
+COPY --from=builder /app/dist/ dist/
+EXPOSE 8080
+ENTRYPOINT ["node", "dist/server/index.js"]
