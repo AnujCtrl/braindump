@@ -19,6 +19,7 @@ export function handleDone(store: Store, id: string): void {
     status: 'done',
     done: true,
     statusChangedAt: now,
+    updatedAt: now,
   });
 
   store.enqueueSyncAction(id, 'status_change');
