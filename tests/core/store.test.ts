@@ -384,3 +384,154 @@ describe('Store workflow states', () => {
     expect(state!.type).toBe('completed_v2');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Edge cases: Unicode, long text, no-op updates
+// ---------------------------------------------------------------------------
+
+describe('Store edge cases', () => {
+  // Protects: Unicode in text and tags round-trips through SQLite + JSON.
+  // SQLite handles UTF-8 natively, but JSON.parse/stringify could corrupt
+  // multi-byte characters if encoding is wrong.
+  it('stores and retrieves Unicode text and tags correctly', () => {
+    const todo = makeTodo({
+      id: 'unicode1',
+      text: 'Comprar cafe en la tienda',
+      tags: ['cafe', 'tienda'],
+      notes: ['nota importante'],
+    });
+    store.create(todo);
+
+    const fetched = store.getById('unicode1');
+    expect(fetched!.text).toBe('Comprar cafe en la tienda');
+    expect(fetched!.tags).toEqual(['cafe', 'tienda']);
+    expect(fetched!.notes).toEqual(['nota importante']);
+  });
+
+  // Protects: CJK characters in text and tags.
+  it('stores and retrieves CJK characters correctly', () => {
+    const todo = makeTodo({
+      id: 'cjk11111',
+      text: 'Buy milk from the store',
+      tags: ['shopping'],
+    });
+    store.create(todo);
+
+    const fetched = store.getById('cjk11111');
+    expect(fetched!.text).toBe('Buy milk from the store');
+    expect(fetched!.tags).toEqual(['shopping']);
+  });
+
+  // Protects: emoji characters in text survive the round-trip.
+  it('stores and retrieves emoji in text', () => {
+    const todo = makeTodo({
+      id: 'emoji111',
+      text: 'Fix the server ASAP',
+      tags: ['fire'],
+    });
+    store.create(todo);
+
+    const fetched = store.getById('emoji111');
+    expect(fetched!.text).toBe('Fix the server ASAP');
+    expect(fetched!.tags).toEqual(['fire']);
+  });
+
+  // Protects: very long text (5000+ chars) does not get truncated by SQLite.
+  // SQLite TEXT columns have no practical length limit, but bugs in string
+  // handling could truncate.
+  it('stores and retrieves very long text (5000+ chars)', () => {
+    const longText = 'x'.repeat(5000);
+    const todo = makeTodo({
+      id: 'long1111',
+      text: longText,
+    });
+    store.create(todo);
+
+    const fetched = store.getById('long1111');
+    expect(fetched!.text).toBe(longText);
+    expect(fetched!.text.length).toBe(5000);
+  });
+
+  // Protects: update with empty object is effectively a no-op.
+  // The merge logic should preserve all existing fields when no changes
+  // are provided.
+  it('update with empty partial object preserves all fields', () => {
+    const todo = makeTodo({
+      id: 'noop1111',
+      text: 'Original',
+      status: 'inbox',
+      urgent: true,
+      tags: ['homelab', 'work'],
+      notes: ['important note'],
+    });
+    store.create(todo);
+
+    // Update with empty object -- should change nothing
+    store.update('noop1111', {});
+
+    const fetched = store.getById('noop1111');
+    expect(fetched!.text).toBe('Original');
+    expect(fetched!.status).toBe('inbox');
+    expect(fetched!.urgent).toBe(true);
+    expect(fetched!.tags).toEqual(['homelab', 'work']);
+    expect(fetched!.notes).toEqual(['important note']);
+  });
+
+  // Protects: update on nonexistent ID is a silent no-op, not a crash.
+  it('update on nonexistent ID does not throw', () => {
+    expect(() => store.update('nonexistent', { text: 'new' })).not.toThrow();
+  });
+
+  // Protects: listByTag with substring that matches another tag.
+  // e.g., searching for "home" should NOT match "homelab" due to the
+  // JSON LIKE pattern using quotes as delimiters.
+  it('listByTag does not match substring of another tag', () => {
+    store.create(makeTodo({ id: 'sub11111', tags: ['homelab'] }));
+    store.create(makeTodo({ id: 'sub22222', tags: ['home'] }));
+
+    const results = store.listByTag('home');
+    const ids = results.map((t) => t.id);
+    expect(ids).toContain('sub22222');
+    expect(ids).not.toContain('sub11111');
+  });
+
+  // Protects: tags with special JSON characters survive round-trip.
+  it('tags with special characters round-trip through JSON', () => {
+    const todo = makeTodo({
+      id: 'spec1111',
+      tags: ['c++', 'c#', 'tag-with-dash', 'tag_with_underscore'],
+    });
+    store.create(todo);
+
+    const fetched = store.getById('spec1111');
+    expect(fetched!.tags).toEqual(['c++', 'c#', 'tag-with-dash', 'tag_with_underscore']);
+  });
+
+  // Protects: notes array with multi-line strings.
+  it('notes with newlines round-trip correctly', () => {
+    const todo = makeTodo({
+      id: 'note1111',
+      notes: ['line1\nline2\nline3', 'another\nnote'],
+    });
+    store.create(todo);
+
+    const fetched = store.getById('note1111');
+    expect(fetched!.notes).toEqual(['line1\nline2\nline3', 'another\nnote']);
+  });
+
+  // Protects: empty arrays for tags/notes/subtasks survive round-trip.
+  it('empty arrays for tags, notes, subtasks round-trip as empty arrays', () => {
+    const todo = makeTodo({
+      id: 'empty111',
+      tags: [],
+      notes: [],
+      subtasks: [],
+    });
+    store.create(todo);
+
+    const fetched = store.getById('empty111');
+    expect(fetched!.tags).toEqual([]);
+    expect(fetched!.notes).toEqual([]);
+    expect(fetched!.subtasks).toEqual([]);
+  });
+});

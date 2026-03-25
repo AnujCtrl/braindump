@@ -425,3 +425,172 @@ describe('runStaleCheck', () => {
     expect(runStaleCheck(store)).toBe(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Boundary precision tests
+// ---------------------------------------------------------------------------
+
+describe('stale boundary precision', () => {
+  // These tests protect against off-by-one and off-by-minute errors in the
+  // stale detection logic. The boundaries are:
+  //   - inbox: stale at >= 7 days (using createdAt)
+  //   - active: stale at >= 24 hours (using statusChangedAt)
+  //
+  // Getting the boundary wrong by even 1 minute means either:
+  //   - Items go stale too early (annoying, user thinks system is broken)
+  //   - Items never go stale (system dies from accumulation)
+
+  /** Returns an ISO string for exactly N milliseconds ago. */
+  function msAgo(ms: number): string {
+    return new Date(Date.now() - ms).toISOString();
+  }
+
+  const MS_7_DAYS = 7 * 24 * 60 * 60 * 1000;
+  const MS_24_HOURS = 24 * 60 * 60 * 1000;
+  const MS_1_MINUTE = 60 * 1000;
+
+  // -- Inbox 7-day boundary --
+
+  // Protects: inbox item at exactly 7 days (to the millisecond) should be stale.
+  it('inbox item at exactly 7 days is stale', () => {
+    const exactTime = msAgo(MS_7_DAYS);
+    store.create(
+      makeTodo({
+        id: 'inbox-exact-7d',
+        status: 'inbox',
+        createdAt: exactTime,
+        statusChangedAt: exactTime,
+      })
+    );
+
+    const stale = findStaleItems(store);
+    expect(stale).toHaveLength(1);
+    expect(stale[0].id).toBe('inbox-exact-7d');
+  });
+
+  // Protects: inbox item 1 minute before the 7-day boundary should NOT be stale.
+  it('inbox item 1 minute under 7 days is NOT stale', () => {
+    const justUnder = msAgo(MS_7_DAYS - MS_1_MINUTE);
+    store.create(
+      makeTodo({
+        id: 'inbox-under-7d',
+        status: 'inbox',
+        createdAt: justUnder,
+        statusChangedAt: justUnder,
+      })
+    );
+
+    const stale = findStaleItems(store);
+    expect(stale).toHaveLength(0);
+  });
+
+  // Protects: inbox item 1 minute past the 7-day boundary is definitely stale.
+  it('inbox item 1 minute over 7 days is stale', () => {
+    const justOver = msAgo(MS_7_DAYS + MS_1_MINUTE);
+    store.create(
+      makeTodo({
+        id: 'inbox-over-7d',
+        status: 'inbox',
+        createdAt: justOver,
+        statusChangedAt: justOver,
+      })
+    );
+
+    const stale = findStaleItems(store);
+    expect(stale).toHaveLength(1);
+    expect(stale[0].id).toBe('inbox-over-7d');
+  });
+
+  // -- Active 24-hour boundary --
+
+  // Protects: active item at exactly 24 hours should be stale.
+  it('active item at exactly 24 hours is stale', () => {
+    const exactTime = msAgo(MS_24_HOURS);
+    store.create(
+      makeTodo({
+        id: 'active-exact-24h',
+        status: 'active',
+        createdAt: daysAgo(5), // created long ago
+        statusChangedAt: exactTime,
+      })
+    );
+
+    const stale = findStaleItems(store);
+    expect(stale).toHaveLength(1);
+    expect(stale[0].id).toBe('active-exact-24h');
+  });
+
+  // Protects: active item 1 minute under the 24-hour boundary should NOT be stale.
+  it('active item 1 minute under 24 hours is NOT stale', () => {
+    const justUnder = msAgo(MS_24_HOURS - MS_1_MINUTE);
+    store.create(
+      makeTodo({
+        id: 'active-under-24h',
+        status: 'active',
+        createdAt: daysAgo(5),
+        statusChangedAt: justUnder,
+      })
+    );
+
+    const stale = findStaleItems(store);
+    expect(stale).toHaveLength(0);
+  });
+
+  // Protects: active item 1 minute past the 24-hour boundary is definitely stale.
+  it('active item 1 minute over 24 hours is stale', () => {
+    const justOver = msAgo(MS_24_HOURS + MS_1_MINUTE);
+    store.create(
+      makeTodo({
+        id: 'active-over-24h',
+        status: 'active',
+        createdAt: daysAgo(5),
+        statusChangedAt: justOver,
+      })
+    );
+
+    const stale = findStaleItems(store);
+    expect(stale).toHaveLength(1);
+    expect(stale[0].id).toBe('active-over-24h');
+  });
+
+  // Protects: unprocessed items should NEVER become stale regardless of age.
+  // They need to go through inbox first.
+  it('unprocessed item older than 7 days is NOT stale', () => {
+    store.create(
+      makeTodo({
+        id: 'unproc-old',
+        status: 'unprocessed',
+        createdAt: daysAgo(30),
+        statusChangedAt: daysAgo(30),
+      })
+    );
+
+    const stale = findStaleItems(store);
+    expect(stale).toHaveLength(0);
+  });
+
+  // Protects: mixed boundary -- one inbox just under, one just over.
+  // Only the "over" one should be stale.
+  it('correctly separates items near the 7-day boundary', () => {
+    store.create(
+      makeTodo({
+        id: 'near-under',
+        status: 'inbox',
+        createdAt: msAgo(MS_7_DAYS - MS_1_MINUTE),
+        statusChangedAt: msAgo(MS_7_DAYS - MS_1_MINUTE),
+      })
+    );
+    store.create(
+      makeTodo({
+        id: 'near-over',
+        status: 'inbox',
+        createdAt: msAgo(MS_7_DAYS + MS_1_MINUTE),
+        statusChangedAt: msAgo(MS_7_DAYS + MS_1_MINUTE),
+      })
+    );
+
+    const stale = findStaleItems(store);
+    expect(stale).toHaveLength(1);
+    expect(stale[0].id).toBe('near-over');
+  });
+});

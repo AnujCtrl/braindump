@@ -291,4 +291,122 @@ describe('parseCapture', () => {
     expect(result.text).toContain('fix server');
     expect(result.text).toContain('dump the cache');
   });
+
+  // -- Additional edge cases --
+
+  // Protects: bare "#" with no word after it should not create an empty tag
+  // or add "#" to the text output. The token is simply discarded.
+  it('bare # as a standalone token is silently ignored', () => {
+    const result = parseCapture('# just a hash');
+    expect(result.tags).toEqual([]);
+    // "just a hash" should remain as text; the bare "#" is dropped
+    expect(result.text).toBe('just a hash');
+  });
+
+  // Protects: multiple @source tokens -- last one wins per spec.
+  // This is important because a user might accidentally type two sources.
+  it('last @source wins when multiple are present', () => {
+    const result = parseCapture('@discord mentioned this @slack');
+    expect(result.source).toBe('slack');
+    expect(result.text).toBe('mentioned this');
+  });
+
+  // Protects: "--" alone at start of input (no trailing text after separator).
+  // Edge case where user types just "--" which means "everything after is plain text"
+  // but there IS nothing after.
+  it('"--" alone as entire input produces empty text', () => {
+    const result = parseCapture('--');
+    expect(result.text).toBe('');
+    expect(result.tags).toEqual([]);
+    expect(result.source).toBeNull();
+  });
+
+  // Protects: "-- " at start means everything is plain text, including tokens.
+  it('"-- " at start of input treats entire rest as plain text', () => {
+    const result = parseCapture('-- #tag @source !! !!!');
+    expect(result.text).toBe('#tag @source !! !!!');
+    expect(result.tags).toEqual([]);
+    expect(result.source).toBeNull();
+    expect(result.urgent).toBe(false);
+    expect(result.important).toBe(false);
+  });
+
+  // Protects: both !! and !!! present as adjacent tokens.
+  // Both flags should be set independently.
+  it('adjacent !! and !!! both set their respective flags', () => {
+    const result = parseCapture('task !! !!!');
+    expect(result.urgent).toBe(true);
+    expect(result.important).toBe(true);
+    expect(result.text).toBe('task');
+  });
+
+  // Protects: !!! followed by !! (reverse order) still sets both flags.
+  it('!!! before !! still sets both flags', () => {
+    const result = parseCapture('task !!! !!');
+    expect(result.urgent).toBe(true);
+    expect(result.important).toBe(true);
+    expect(result.text).toBe('task');
+  });
+
+  // Protects: very long input does not crash or truncate.
+  // Stress test for the tokenizer and parser.
+  it('handles very long input (1000+ characters) without truncation', () => {
+    const longWord = 'a'.repeat(500);
+    const input = `${longWord} #longtag ${longWord}`;
+    const result = parseCapture(input);
+    expect(result.text).toBe(`${longWord} ${longWord}`);
+    expect(result.tags).toEqual(['longtag']);
+    // Verify nothing was truncated
+    expect(result.text.length).toBe(1001); // 500 + space + 500
+  });
+
+  // Protects: multiple --note extractions in one input.
+  it('extracts multiple --note occurrences', () => {
+    const result = parseCapture(
+      'fix server --note "first note" --note "second note"'
+    );
+    expect(result.text).toBe('fix server');
+    expect(result.notes).toEqual(['first note', 'second note']);
+  });
+
+  // Protects: --note with unclosed quote takes the rest of the string.
+  it('--note with unclosed quote takes rest as note value', () => {
+    const result = parseCapture('fix server --note "this is unclosed');
+    expect(result.notes).toEqual(['this is unclosed']);
+    expect(result.text).toBe('fix server');
+  });
+
+  // Protects: whitespace-only input produces same result as empty input.
+  it('whitespace-only input returns empty result', () => {
+    const result = parseCapture('   ');
+    expect(result.text).toBe('');
+    expect(result.tags).toEqual([]);
+    expect(result.source).toBeNull();
+    expect(result.urgent).toBe(false);
+    expect(result.important).toBe(false);
+    expect(result.notes).toEqual([]);
+  });
+
+  // Protects: bare @ with no word is silently ignored (not added to text).
+  it('bare @ is ignored and not included in text', () => {
+    const result = parseCapture('send @ email');
+    expect(result.source).toBeNull();
+    expect(result.text).toBe('send email');
+  });
+
+  // Protects: tag with special characters in the word part.
+  // "#tag-name" should be captured as tag "tag-name".
+  it('tag with hyphen is captured as a single tag', () => {
+    const result = parseCapture('fix #my-tag issue');
+    expect(result.tags).toEqual(['my-tag']);
+    expect(result.text).toBe('fix issue');
+  });
+
+  // Protects: "--note" at the very end of input with no value.
+  // Should not crash; note is simply not added.
+  it('--note at end with no value does not crash', () => {
+    const result = parseCapture('text --note');
+    expect(result.notes).toEqual([]);
+    expect(result.text).toBe('text');
+  });
 });
