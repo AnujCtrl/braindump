@@ -2,6 +2,7 @@ import type { FastifyRequest, FastifyReply } from 'fastify';
 import type { Store } from '../core/store.js';
 import type { SyncEngine } from '../core/sync.js';
 import type { Todo } from '../core/models.js';
+import { VALID_STATUSES } from '../core/models.js';
 import { generateId } from '../core/id.js';
 
 interface CreateTodoBody {
@@ -146,6 +147,11 @@ export class Handlers {
   ): Promise<void> {
     const { id } = request.params;
     const { status } = request.body;
+
+    if (!VALID_STATUSES.includes(status as Todo['status'])) {
+      reply.status(400).send({ error: `invalid status: ${status}` });
+      return;
+    }
 
     const existing = this.store.getById(id);
     if (!existing) {
