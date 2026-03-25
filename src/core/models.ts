@@ -37,7 +37,7 @@ export interface SyncQueueEntry {
   id: number;
   todoId: string;
   action: string;
-  payload: string;
+  payload: Record<string, unknown>;
   createdAt: string;
   attempts: number;
   lastError: string | null;
