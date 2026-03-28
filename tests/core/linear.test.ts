@@ -10,34 +10,28 @@
 // - API failures not being caught by isAvailable check
 // - fetchWorkflowStates returning wrong shape
 
+import { mock, describe, it, expect } from 'bun:test';
 import { LinearBridge } from '../../src/core/linear.js';
-
-// Mock the Linear SDK
-vi.mock('@linear/sdk', () => {
-  return {
-    LinearClient: vi.fn(),
-  };
-});
 
 // Helper to build a mock LinearClient with controllable responses
 function createMockClient(overrides: Record<string, unknown> = {}) {
   return {
-    issueCreate: vi.fn().mockResolvedValue({
+    issueCreate: mock().mockResolvedValue({
       success: true,
       issue: Promise.resolve({ id: 'linear-issue-1' }),
     }),
-    issueUpdate: vi.fn().mockResolvedValue({ success: true }),
-    issueLabelCreate: vi.fn().mockResolvedValue({
+    issueUpdate: mock().mockResolvedValue({ success: true }),
+    issueLabelCreate: mock().mockResolvedValue({
       success: true,
       issueLabel: Promise.resolve({
         id: 'linear-label-new',
         name: 'newlabel',
       }),
     }),
-    issueLabels: vi.fn().mockResolvedValue({
+    issueLabels: mock().mockResolvedValue({
       nodes: [],
     }),
-    workflowStates: vi.fn().mockResolvedValue({
+    workflowStates: mock().mockResolvedValue({
       nodes: [
         { id: 'ws-1', name: 'Backlog', type: 'backlog' },
         { id: 'ws-2', name: 'In Progress', type: 'started' },
@@ -127,7 +121,7 @@ describe('LinearBridge', () => {
   describe('ensureLabel', () => {
     it('creates label if not found in cache and returns label ID', async () => {
       const client = createMockClient({
-        issueLabels: vi.fn().mockResolvedValue({ nodes: [] }),
+        issueLabels: mock().mockResolvedValue({ nodes: [] }),
       });
       const bridge = new LinearBridge(client, teamId);
 
@@ -139,7 +133,7 @@ describe('LinearBridge', () => {
 
     it('returns existing label ID if found in cache (no API create call)', async () => {
       const client = createMockClient({
-        issueLabels: vi.fn().mockResolvedValue({
+        issueLabels: mock().mockResolvedValue({
           nodes: [{ id: 'existing-label', name: 'homelab' }],
         }),
       });
@@ -155,7 +149,7 @@ describe('LinearBridge', () => {
 
     it('caches labels so second call for same name does not re-fetch', async () => {
       const client = createMockClient({
-        issueLabels: vi.fn().mockResolvedValue({
+        issueLabels: mock().mockResolvedValue({
           nodes: [{ id: 'cached-label', name: 'work' }],
         }),
       });

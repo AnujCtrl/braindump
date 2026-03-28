@@ -16,7 +16,8 @@
 // - GET /api/health missing or wrong response body
 
 import Fastify, { type FastifyInstance } from 'fastify';
-import Database from 'better-sqlite3';
+import { Database } from 'bun:sqlite';
+import { mock, describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { initDb } from '../../src/core/db.js';
 import { Store } from '../../src/core/store.js';
 import { Handlers } from '../../src/server/handlers.js';
@@ -24,14 +25,14 @@ import { registerRoutes } from '../../src/server/routes.js';
 import type { Todo } from '../../src/core/models.js';
 import type { SyncEngine } from '../../src/core/sync.js';
 
-let db: Database.Database;
+let db: Database;
 let store: Store;
 let app: FastifyInstance;
 
 /** Creates a mock SyncEngine. */
 function createMockSyncEngine(): SyncEngine {
   return {
-    drainQueue: vi.fn().mockResolvedValue(undefined),
+    drainQueue: mock().mockResolvedValue(undefined),
   } as unknown as SyncEngine;
 }
 

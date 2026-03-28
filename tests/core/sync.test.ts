@@ -10,14 +10,15 @@
 // - Delete action sent to Linear even when local todo was already deleted
 // - Queue drain running when Linear is offline (should skip gracefully)
 
-import Database from 'better-sqlite3';
+import { Database } from 'bun:sqlite';
+import { mock, describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { initDb } from '../../src/core/db.js';
 import { Store } from '../../src/core/store.js';
 import { SyncEngine } from '../../src/core/sync.js';
 import type { LinearBridge } from '../../src/core/linear.js';
 import type { Todo } from '../../src/core/models.js';
 
-let db: Database.Database;
+let db: Database;
 let store: Store;
 
 beforeEach(() => {
@@ -56,12 +57,12 @@ function makeTodo(overrides: Partial<Todo> = {}): Todo {
 /** Creates a mock LinearBridge with controllable behavior. */
 function createMockBridge(overrides: Partial<LinearBridge> = {}): LinearBridge {
   return {
-    createIssue: vi.fn().mockResolvedValue('linear-new-id'),
-    updateIssue: vi.fn().mockResolvedValue(undefined),
-    deleteIssue: vi.fn().mockResolvedValue(undefined),
-    ensureLabel: vi.fn().mockResolvedValue('label-id'),
-    fetchWorkflowStates: vi.fn().mockResolvedValue([]),
-    isAvailable: vi.fn().mockResolvedValue(true),
+    createIssue: mock().mockResolvedValue('linear-new-id'),
+    updateIssue: mock().mockResolvedValue(undefined),
+    deleteIssue: mock().mockResolvedValue(undefined),
+    ensureLabel: mock().mockResolvedValue('label-id'),
+    fetchWorkflowStates: mock().mockResolvedValue([]),
+    isAvailable: mock().mockResolvedValue(true),
     ...overrides,
   } as unknown as LinearBridge;
 }
@@ -97,7 +98,7 @@ describe('SyncEngine.drainQueue', () => {
     store.enqueueSyncAction('skip-1', 'create', {});
 
     const bridge = createMockBridge({
-      isAvailable: vi.fn().mockResolvedValue(false),
+      isAvailable: mock().mockResolvedValue(false),
     });
     const engine = new SyncEngine(store, bridge);
 
@@ -115,7 +116,7 @@ describe('SyncEngine.drainQueue', () => {
     store.enqueueSyncAction('fail-1', 'create', {});
 
     const bridge = createMockBridge({
-      createIssue: vi.fn().mockRejectedValue(new Error('API timeout')),
+      createIssue: mock().mockRejectedValue(new Error('API timeout')),
     });
     const engine = new SyncEngine(store, bridge);
 
@@ -208,7 +209,7 @@ describe('SyncEngine.drainQueue', () => {
 
     const callOrder: string[] = [];
     const bridge = createMockBridge({
-      createIssue: vi.fn().mockImplementation(() => {
+      createIssue: mock().mockImplementation(() => {
         callOrder.push('create');
         return Promise.resolve('lin-new');
       }),

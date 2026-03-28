@@ -13,10 +13,10 @@
 import { mkdtempSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import Database from 'better-sqlite3';
+import { Database } from 'bun:sqlite';
 import { initDb } from '../../src/core/db.js';
 
-let db: Database.Database;
+let db: Database;
 
 beforeEach(() => {
   db = new Database(':memory:');

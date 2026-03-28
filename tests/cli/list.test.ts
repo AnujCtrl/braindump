@@ -11,6 +11,7 @@
 // - formatTodoLine dropping the sync indicator or mangling tags
 // - Checkbox state not reflecting done status
 
+import { mock, describe, it, expect } from 'bun:test';
 import { handleList, formatTodoLine } from '../../src/cli/list.js';
 import type { Store } from '../../src/core/store.js';
 import type { Todo } from '../../src/core/models.js';
@@ -41,18 +42,18 @@ function makeTodo(overrides: Partial<Todo> = {}): Todo {
 /** Creates a mock Store with controllable return values. */
 function createMockStore(overrides: Partial<Record<string, unknown>> = {}): Store {
   return {
-    create: vi.fn(),
-    getById: vi.fn().mockReturnValue(null),
-    listByStatus: vi.fn().mockReturnValue([]),
-    listOpen: vi.fn().mockReturnValue([]),
-    listAll: vi.fn().mockReturnValue([]),
-    listByTag: vi.fn().mockReturnValue([]),
-    update: vi.fn(),
-    delete: vi.fn(),
-    allIds: vi.fn().mockReturnValue(new Set()),
-    getInfoCounts: vi.fn().mockReturnValue({ unprocessed: 0, active: 0, looping: 0 }),
-    enqueueSyncAction: vi.fn(),
-    pendingSyncActions: vi.fn().mockReturnValue([]),
+    create: mock(),
+    getById: mock().mockReturnValue(null),
+    listByStatus: mock().mockReturnValue([]),
+    listOpen: mock().mockReturnValue([]),
+    listAll: mock().mockReturnValue([]),
+    listByTag: mock().mockReturnValue([]),
+    update: mock(),
+    delete: mock(),
+    allIds: mock().mockReturnValue(new Set()),
+    getInfoCounts: mock().mockReturnValue({ unprocessed: 0, active: 0, looping: 0 }),
+    enqueueSyncAction: mock(),
+    pendingSyncActions: mock().mockReturnValue([]),
     ...overrides,
   } as unknown as Store;
 }
@@ -68,7 +69,7 @@ describe('handleList', () => {
       makeTodo({ id: 'open1', status: 'inbox' }),
       makeTodo({ id: 'open2', status: 'active' }),
     ];
-    const store = createMockStore({ listOpen: vi.fn().mockReturnValue(openTodos) });
+    const store = createMockStore({ listOpen: mock().mockReturnValue(openTodos) });
 
     const result = handleList(store, {});
 
@@ -81,7 +82,7 @@ describe('handleList', () => {
   it('filters by tag when tag option is provided', () => {
     // Protects: tag filter being silently ignored, returning all items.
     const taggedTodos = [makeTodo({ id: 'tagged1', tags: ['homelab'] })];
-    const store = createMockStore({ listByTag: vi.fn().mockReturnValue(taggedTodos) });
+    const store = createMockStore({ listByTag: mock().mockReturnValue(taggedTodos) });
 
     const result = handleList(store, { tag: 'homelab' });
 
@@ -93,7 +94,7 @@ describe('handleList', () => {
   it('filters by status when status option is provided', () => {
     // Protects: status filter being ignored, returning all items.
     const activeTodos = [makeTodo({ id: 'active1', status: 'active' })];
-    const store = createMockStore({ listByStatus: vi.fn().mockReturnValue(activeTodos) });
+    const store = createMockStore({ listByStatus: mock().mockReturnValue(activeTodos) });
 
     const result = handleList(store, { status: 'active' });
 
@@ -108,7 +109,7 @@ describe('handleList', () => {
       makeTodo({ id: 'open1', status: 'inbox' }),
       makeTodo({ id: 'done1', status: 'done', done: true }),
     ];
-    const store = createMockStore({ listAll: vi.fn().mockReturnValue(allTodos) });
+    const store = createMockStore({ listAll: mock().mockReturnValue(allTodos) });
 
     const result = handleList(store, { all: true });
 
@@ -125,7 +126,7 @@ describe('handleList', () => {
       makeTodo({ id: 'notloop', staleCount: 1 }),
       makeTodo({ id: 'fresh', staleCount: 0 }),
     ];
-    const store = createMockStore({ listOpen: vi.fn().mockReturnValue(allOpen) });
+    const store = createMockStore({ listOpen: mock().mockReturnValue(allOpen) });
 
     const result = handleList(store, { looping: true });
 
@@ -140,7 +141,7 @@ describe('handleList', () => {
     const allOpen = [
       makeTodo({ id: 'loop1', staleCount: 3 }),
     ];
-    const store = createMockStore({ listOpen: vi.fn().mockReturnValue(allOpen) });
+    const store = createMockStore({ listOpen: mock().mockReturnValue(allOpen) });
 
     // handleList with looping should use listOpen (which excludes done),
     // then further filter by staleCount >= 2

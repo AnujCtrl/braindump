@@ -4,32 +4,27 @@
   "description": "Todo capture system with Linear integration",
   "type": "module",
   "bin": {
-    "braindump": "dist/cli/index.js"
+    "braindump": "src/cli/index.ts"
   },
   "scripts": {
-    "build": "tsup",
-    "dev": "tsx src/cli/index.ts",
-    "server": "tsx src/server/index.ts",
-    "test": "vitest run",
+    "build": "bun build --compile src/cli/index.ts --outfile dist/braindump",
+    "dev": "bun run src/cli/index.ts",
+    "server": "bun run src/server/index.ts",
+    "test": "bun test",
     "lint": "tsc --noEmit"
   },
   "dependencies": {
     "@inquirer/prompts": "^7.5.1",
     "@linear/sdk": "^37.0.0",
-    "better-sqlite3": "^11.9.1",
     "commander": "^13.1.0",
     "fastify": "^5.3.2",
     "yaml": "^2.7.1"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "bun": ">=1.1.0"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.12",
-    "@types/node": "^22.13.14",
-    "tsup": "^8.4.0",
-    "tsx": "^4.19.3",
-    "typescript": "^5.8.2",
-    "vitest": "^3.0.9"
+    "@types/bun": "latest",
+    "typescript": "^5.8.2"
   }
 }

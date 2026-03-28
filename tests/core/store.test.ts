@@ -12,12 +12,12 @@
 // - Info counts miscounting statuses
 // - Sync queue ordering and lifecycle
 
-import Database from 'better-sqlite3';
+import { Database } from 'bun:sqlite';
 import { initDb } from '../../src/core/db.js';
 import { Store } from '../../src/core/store.js';
 import type { Todo } from '../../src/core/models.js';
 
-let db: Database.Database;
+let db: Database;
 let store: Store;
 
 beforeEach(() => {

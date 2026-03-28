@@ -11,6 +11,7 @@
 // - Missing ID not throwing (silent failure)
 // - Already-done items being re-done (double-counting, duplicate sync events)
 
+import { mock, describe, it, expect } from 'bun:test';
 import { handleDone } from '../../src/cli/done.js';
 import type { Store } from '../../src/core/store.js';
 import type { Todo } from '../../src/core/models.js';
@@ -41,18 +42,18 @@ function makeTodo(overrides: Partial<Todo> = {}): Todo {
 /** Creates a mock Store with controllable behavior. */
 function createMockStore(overrides: Partial<Record<string, unknown>> = {}): Store {
   return {
-    create: vi.fn(),
-    getById: vi.fn().mockReturnValue(null),
-    listByStatus: vi.fn().mockReturnValue([]),
-    listOpen: vi.fn().mockReturnValue([]),
-    listAll: vi.fn().mockReturnValue([]),
-    listByTag: vi.fn().mockReturnValue([]),
-    update: vi.fn(),
-    delete: vi.fn(),
-    allIds: vi.fn().mockReturnValue(new Set()),
-    getInfoCounts: vi.fn().mockReturnValue({ unprocessed: 0, active: 0, looping: 0 }),
-    enqueueSyncAction: vi.fn(),
-    pendingSyncActions: vi.fn().mockReturnValue([]),
+    create: mock(),
+    getById: mock().mockReturnValue(null),
+    listByStatus: mock().mockReturnValue([]),
+    listOpen: mock().mockReturnValue([]),
+    listAll: mock().mockReturnValue([]),
+    listByTag: mock().mockReturnValue([]),
+    update: mock(),
+    delete: mock(),
+    allIds: mock().mockReturnValue(new Set()),
+    getInfoCounts: mock().mockReturnValue({ unprocessed: 0, active: 0, looping: 0 }),
+    enqueueSyncAction: mock(),
+    pendingSyncActions: mock().mockReturnValue([]),
     ...overrides,
   } as unknown as Store;
 }
@@ -66,12 +67,12 @@ describe('handleDone', () => {
     // Protects: the core completion behavior. If status or done flag is
     // not set, the todo appears in open lists forever.
     const todo = makeTodo({ id: 'abc12345', status: 'active' });
-    const store = createMockStore({ getById: vi.fn().mockReturnValue(todo) });
+    const store = createMockStore({ getById: mock().mockReturnValue(todo) });
 
     handleDone(store, 'abc12345');
 
     expect(store.update).toHaveBeenCalledTimes(1);
-    const updateArgs = (store.update as ReturnType<typeof vi.fn>).mock.calls[0];
+    const updateArgs = (store.update as ReturnType<typeof mock>).mock.calls[0];
     expect(updateArgs[0]).toBe('abc12345');
     expect(updateArgs[1]).toMatchObject({
       status: 'done',
@@ -83,12 +84,12 @@ describe('handleDone', () => {
     // Protects: Linear not being notified when a todo is completed.
     // Without the sync action, the Linear issue stays open.
     const todo = makeTodo({ id: 'sync-done', status: 'active' });
-    const store = createMockStore({ getById: vi.fn().mockReturnValue(todo) });
+    const store = createMockStore({ getById: mock().mockReturnValue(todo) });
 
     handleDone(store, 'sync-done');
 
     expect(store.enqueueSyncAction).toHaveBeenCalledTimes(1);
-    const syncArgs = (store.enqueueSyncAction as ReturnType<typeof vi.fn>).mock.calls[0];
+    const syncArgs = (store.enqueueSyncAction as ReturnType<typeof mock>).mock.calls[0];
     expect(syncArgs[0]).toBe('sync-done');
     expect(syncArgs[1]).toBe('status_change');
   });
@@ -96,7 +97,7 @@ describe('handleDone', () => {
   it('throws when ID is not found in store', () => {
     // Protects: silent failure when user types a wrong/partial ID.
     // Must throw so the CLI can show an error message.
-    const store = createMockStore({ getById: vi.fn().mockReturnValue(null) });
+    const store = createMockStore({ getById: mock().mockReturnValue(null) });
 
     expect(() => handleDone(store, 'nonexistent')).toThrow();
     expect(store.update).not.toHaveBeenCalled();
@@ -107,7 +108,7 @@ describe('handleDone', () => {
     // Protects: double-completion creating duplicate sync events.
     // Completing an already-done item is always a user error.
     const todo = makeTodo({ id: 'already-done', status: 'done', done: true });
-    const store = createMockStore({ getById: vi.fn().mockReturnValue(todo) });
+    const store = createMockStore({ getById: mock().mockReturnValue(todo) });
 
     expect(() => handleDone(store, 'already-done')).toThrow();
     expect(store.update).not.toHaveBeenCalled();
@@ -118,31 +119,31 @@ describe('handleDone', () => {
     // Protects: done only working from "active" status.
     // Users should be able to mark inbox items as done directly.
     const todo = makeTodo({ id: 'inbox-done', status: 'inbox' });
-    const store = createMockStore({ getById: vi.fn().mockReturnValue(todo) });
+    const store = createMockStore({ getById: mock().mockReturnValue(todo) });
 
     handleDone(store, 'inbox-done');
 
     expect(store.update).toHaveBeenCalledTimes(1);
-    const updateArgs = (store.update as ReturnType<typeof vi.fn>).mock.calls[0];
+    const updateArgs = (store.update as ReturnType<typeof mock>).mock.calls[0];
     expect(updateArgs[1]).toMatchObject({ status: 'done', done: true });
   });
 
   it('works for stale items', () => {
     // Protects: stale items being stuck and unable to be completed.
     const todo = makeTodo({ id: 'stale-done', status: 'stale', staleCount: 3 });
-    const store = createMockStore({ getById: vi.fn().mockReturnValue(todo) });
+    const store = createMockStore({ getById: mock().mockReturnValue(todo) });
 
     handleDone(store, 'stale-done');
 
     expect(store.update).toHaveBeenCalledTimes(1);
-    const updateArgs = (store.update as ReturnType<typeof vi.fn>).mock.calls[0];
+    const updateArgs = (store.update as ReturnType<typeof mock>).mock.calls[0];
     expect(updateArgs[1]).toMatchObject({ status: 'done', done: true });
   });
 
   it('works for waiting items', () => {
     // Protects: waiting items unable to be directly completed.
     const todo = makeTodo({ id: 'waiting-done', status: 'waiting' });
-    const store = createMockStore({ getById: vi.fn().mockReturnValue(todo) });
+    const store = createMockStore({ getById: mock().mockReturnValue(todo) });
 
     handleDone(store, 'waiting-done');
 
@@ -153,11 +154,11 @@ describe('handleDone', () => {
     // Protects: statusChangedAt not being updated, causing stale detection
     // to use the old timestamp.
     const todo = makeTodo({ id: 'ts-done', status: 'active' });
-    const store = createMockStore({ getById: vi.fn().mockReturnValue(todo) });
+    const store = createMockStore({ getById: mock().mockReturnValue(todo) });
 
     handleDone(store, 'ts-done');
 
-    const updateArgs = (store.update as ReturnType<typeof vi.fn>).mock.calls[0];
+    const updateArgs = (store.update as ReturnType<typeof mock>).mock.calls[0];
     expect(updateArgs[1].statusChangedAt).toBeDefined();
     expect(typeof updateArgs[1].statusChangedAt).toBe('string');
   });

@@ -13,25 +13,26 @@
 // - Urgent/important flags being lost during creation
 // - defaultSource not being used when no @source is given
 
+import { mock, describe, it, expect } from 'bun:test';
 import { handleCapture } from '../../src/cli/capture.js';
 import type { Store } from '../../src/core/store.js';
 import type { Todo } from '../../src/core/models.js';
 
-/** Creates a mock Store with vi.fn() for all methods. */
+/** Creates a mock Store with mock() for all methods. */
 function createMockStore(overrides: Partial<Record<keyof Store, unknown>> = {}): Store {
   return {
-    create: vi.fn(),
-    getById: vi.fn().mockReturnValue(null),
-    listByStatus: vi.fn().mockReturnValue([]),
-    listOpen: vi.fn().mockReturnValue([]),
-    listAll: vi.fn().mockReturnValue([]),
-    listByTag: vi.fn().mockReturnValue([]),
-    update: vi.fn(),
-    delete: vi.fn(),
-    allIds: vi.fn().mockReturnValue(new Set()),
-    getInfoCounts: vi.fn().mockReturnValue({ unprocessed: 0, active: 0, looping: 0 }),
-    enqueueSyncAction: vi.fn(),
-    pendingSyncActions: vi.fn().mockReturnValue([]),
+    create: mock(),
+    getById: mock().mockReturnValue(null),
+    listByStatus: mock().mockReturnValue([]),
+    listOpen: mock().mockReturnValue([]),
+    listAll: mock().mockReturnValue([]),
+    listByTag: mock().mockReturnValue([]),
+    update: mock(),
+    delete: mock(),
+    allIds: mock().mockReturnValue(new Set()),
+    getInfoCounts: mock().mockReturnValue({ unprocessed: 0, active: 0, looping: 0 }),
+    enqueueSyncAction: mock(),
+    pendingSyncActions: mock().mockReturnValue([]),
     ...overrides,
   } as unknown as Store;
 }
@@ -48,7 +49,7 @@ describe('handleCapture', () => {
     handleCapture(store, { text: 'buy groceries' });
 
     expect(store.create).toHaveBeenCalledTimes(1);
-    const created = (store.create as ReturnType<typeof vi.fn>).mock.calls[0][0] as Todo;
+    const created = (store.create as ReturnType<typeof mock>).mock.calls[0][0] as Todo;
     expect(created.text).toBe('buy groceries');
     expect(created.status).toBe('inbox');
   });
@@ -81,7 +82,7 @@ describe('handleCapture', () => {
 
     handleCapture(store, { text: 'random thought' });
 
-    const created = (store.create as ReturnType<typeof vi.fn>).mock.calls[0][0] as Todo;
+    const created = (store.create as ReturnType<typeof mock>).mock.calls[0][0] as Todo;
     expect(created.tags).toEqual(['braindump']);
   });
 
@@ -91,7 +92,7 @@ describe('handleCapture', () => {
 
     handleCapture(store, { text: 'fix DNS', tags: ['homelab', 'networking'] });
 
-    const created = (store.create as ReturnType<typeof vi.fn>).mock.calls[0][0] as Todo;
+    const created = (store.create as ReturnType<typeof mock>).mock.calls[0][0] as Todo;
     expect(created.tags).toEqual(['homelab', 'networking']);
     expect(created.tags).not.toContain('braindump');
   });
@@ -102,7 +103,7 @@ describe('handleCapture', () => {
 
     handleCapture(store, { text: 'stray thought', tags: [] });
 
-    const created = (store.create as ReturnType<typeof vi.fn>).mock.calls[0][0] as Todo;
+    const created = (store.create as ReturnType<typeof mock>).mock.calls[0][0] as Todo;
     expect(created.tags).toEqual(['braindump']);
   });
 
@@ -117,7 +118,7 @@ describe('handleCapture', () => {
 
     handleCapture(store, { text: 'buy milk', defaultSource: 'cli' });
 
-    const created = (store.create as ReturnType<typeof vi.fn>).mock.calls[0][0] as Todo;
+    const created = (store.create as ReturnType<typeof mock>).mock.calls[0][0] as Todo;
     expect(created.source).toBe('cli');
   });
 
@@ -127,7 +128,7 @@ describe('handleCapture', () => {
 
     handleCapture(store, { text: 'play bedwars', source: 'minecraft', defaultSource: 'cli' });
 
-    const created = (store.create as ReturnType<typeof vi.fn>).mock.calls[0][0] as Todo;
+    const created = (store.create as ReturnType<typeof mock>).mock.calls[0][0] as Todo;
     expect(created.source).toBe('minecraft');
   });
 
@@ -137,7 +138,7 @@ describe('handleCapture', () => {
 
     handleCapture(store, { text: 'random thought' });
 
-    const created = (store.create as ReturnType<typeof vi.fn>).mock.calls[0][0] as Todo;
+    const created = (store.create as ReturnType<typeof mock>).mock.calls[0][0] as Todo;
     expect(created.source).toBe('cli');
   });
 
@@ -153,7 +154,7 @@ describe('handleCapture', () => {
       knownTags: ['minecraft', 'gaming', 'homelab'],
     });
 
-    const created = (store.create as ReturnType<typeof vi.fn>).mock.calls[0][0] as Todo;
+    const created = (store.create as ReturnType<typeof mock>).mock.calls[0][0] as Todo;
     expect(created.tags).toContain('minecraft');
     expect(created.tags).toContain('gaming');
   });
@@ -169,7 +170,7 @@ describe('handleCapture', () => {
       knownTags: ['health', 'homelab'],
     });
 
-    const created = (store.create as ReturnType<typeof vi.fn>).mock.calls[0][0] as Todo;
+    const created = (store.create as ReturnType<typeof mock>).mock.calls[0][0] as Todo;
     expect(created.tags).not.toContain('phone');
     expect(created.tags).toContain('health');
   });
@@ -185,7 +186,7 @@ describe('handleCapture', () => {
       knownTags: ['minecraft'],
     });
 
-    const created = (store.create as ReturnType<typeof vi.fn>).mock.calls[0][0] as Todo;
+    const created = (store.create as ReturnType<typeof mock>).mock.calls[0][0] as Todo;
     const minecraftCount = created.tags.filter((t: string) => t === 'minecraft').length;
     expect(minecraftCount).toBe(1);
   });
@@ -200,7 +201,7 @@ describe('handleCapture', () => {
 
     handleCapture(store, { text: 'fix server now', urgent: true });
 
-    const created = (store.create as ReturnType<typeof vi.fn>).mock.calls[0][0] as Todo;
+    const created = (store.create as ReturnType<typeof mock>).mock.calls[0][0] as Todo;
     expect(created.urgent).toBe(true);
   });
 
@@ -210,7 +211,7 @@ describe('handleCapture', () => {
 
     handleCapture(store, { text: 'backup data', important: true });
 
-    const created = (store.create as ReturnType<typeof vi.fn>).mock.calls[0][0] as Todo;
+    const created = (store.create as ReturnType<typeof mock>).mock.calls[0][0] as Todo;
     expect(created.important).toBe(true);
   });
 
@@ -220,7 +221,7 @@ describe('handleCapture', () => {
 
     handleCapture(store, { text: 'casual thought' });
 
-    const created = (store.create as ReturnType<typeof vi.fn>).mock.calls[0][0] as Todo;
+    const created = (store.create as ReturnType<typeof mock>).mock.calls[0][0] as Todo;
     expect(created.urgent).toBe(false);
     expect(created.important).toBe(false);
   });
@@ -231,7 +232,7 @@ describe('handleCapture', () => {
 
     handleCapture(store, { text: 'critical fix', urgent: true, important: true });
 
-    const created = (store.create as ReturnType<typeof vi.fn>).mock.calls[0][0] as Todo;
+    const created = (store.create as ReturnType<typeof mock>).mock.calls[0][0] as Todo;
     expect(created.urgent).toBe(true);
     expect(created.important).toBe(true);
   });
@@ -246,7 +247,7 @@ describe('handleCapture', () => {
 
     handleCapture(store, { text: 'fix server', notes: ['check logs first'] });
 
-    const created = (store.create as ReturnType<typeof vi.fn>).mock.calls[0][0] as Todo;
+    const created = (store.create as ReturnType<typeof mock>).mock.calls[0][0] as Todo;
     expect(created.notes).toEqual(['check logs first']);
   });
 
@@ -255,7 +256,7 @@ describe('handleCapture', () => {
 
     handleCapture(store, { text: 'quick thought' });
 
-    const created = (store.create as ReturnType<typeof vi.fn>).mock.calls[0][0] as Todo;
+    const created = (store.create as ReturnType<typeof mock>).mock.calls[0][0] as Todo;
     expect(created.notes).toEqual([]);
   });
 
@@ -271,7 +272,7 @@ describe('handleCapture', () => {
     handleCapture(store, { text: 'sync me' });
 
     expect(store.enqueueSyncAction).toHaveBeenCalledTimes(1);
-    const callArgs = (store.enqueueSyncAction as ReturnType<typeof vi.fn>).mock.calls[0];
+    const callArgs = (store.enqueueSyncAction as ReturnType<typeof mock>).mock.calls[0];
     // First arg: todoId (should be a string)
     expect(typeof callArgs[0]).toBe('string');
     // Second arg: action type
@@ -310,7 +311,7 @@ describe('handleCapture', () => {
       defaultSource: 'cli',
     });
 
-    const created = (store.create as ReturnType<typeof vi.fn>).mock.calls[0][0] as Todo;
+    const created = (store.create as ReturnType<typeof mock>).mock.calls[0][0] as Todo;
     expect(created.id).toBeDefined();
     expect(typeof created.id).toBe('string');
     expect(created.linearId).toBeNull();

@@ -1,12 +1,12 @@
-import Database from 'better-sqlite3';
+import { Database } from 'bun:sqlite';
 
 /**
  * Initializes the SQLite database schema.
  * Creates all tables if they don't exist and enables WAL mode.
  * This function is idempotent -- safe to call on every startup.
  */
-export function initDb(db: Database.Database): void {
-  db.pragma('journal_mode = WAL');
+export function initDb(db: Database): void {
+  db.exec('PRAGMA journal_mode = WAL');
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS todos (

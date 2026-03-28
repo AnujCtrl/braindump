@@ -12,7 +12,7 @@
 // - Stale count not incrementing on revive
 // - Sync queue not being populated on stale/revive operations
 
-import Database from 'better-sqlite3';
+import { Database } from 'bun:sqlite';
 import { initDb } from '../../src/core/db.js';
 import { Store } from '../../src/core/store.js';
 import {
@@ -24,7 +24,7 @@ import {
 } from '../../src/core/stale.js';
 import type { Todo } from '../../src/core/models.js';
 
-let db: Database.Database;
+let db: Database;
 let store: Store;
 
 beforeEach(() => {

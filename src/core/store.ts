@@ -1,4 +1,4 @@
-import Database from 'better-sqlite3';
+import { Database } from 'bun:sqlite';
 import type { Todo, SyncQueueEntry } from './models.js';
 
 interface DbTodoRow {
@@ -74,9 +74,9 @@ function rowToSyncQueueEntry(row: DbSyncQueueRow): SyncQueueEntry {
 }
 
 export class Store {
-  private db: Database.Database;
+  private db: Database;
 
-  constructor(db: Database.Database) {
+  constructor(db: Database) {
     this.db = db;
   }
 

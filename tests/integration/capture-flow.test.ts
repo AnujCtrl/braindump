@@ -8,13 +8,13 @@
 // enqueue a sync action, or handleDone marks done but the todo doesn't leave
 // listOpen).
 
-import Database from 'better-sqlite3';
+import { Database } from 'bun:sqlite';
 import { initDb } from '../../src/core/db.js';
 import { Store } from '../../src/core/store.js';
 import { handleCapture } from '../../src/cli/capture.js';
 import { handleDone } from '../../src/cli/done.js';
 
-let db: Database.Database;
+let db: Database;
 let store: Store;
 
 beforeEach(() => {
