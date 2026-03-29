@@ -7,7 +7,12 @@ import { resolveBraindumpHome } from '../config.js';
 const SERVICE_LABEL = 'com.braindump.server';
 
 function getBinaryPath(): string {
-  // Bun.execPath gives the compiled binary path
+  // Try to find the installed 'braindump' command first
+  try {
+    const which = execSync('which braindump', { encoding: 'utf-8' }).trim();
+    if (which) return which;
+  } catch {}
+  // Fall back to Bun.execPath (compiled binary) or process.execPath
   return typeof Bun !== 'undefined' ? Bun.execPath : process.execPath;
 }
 
@@ -49,6 +54,8 @@ function generatePlist(): string {
   <dict>
     <key>BRAINDUMP_HOME</key>
     <string>${home}</string>
+    <key>PATH</key>
+    <string>${process.env.PATH}</string>
   </dict>
 </dict>
 </plist>`;

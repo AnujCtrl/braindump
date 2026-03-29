@@ -16,12 +16,12 @@ import { LinearBridge } from '../../src/core/linear.js';
 // Helper to build a mock LinearClient with controllable responses
 function createMockClient(overrides: Record<string, unknown> = {}) {
   return {
-    issueCreate: mock().mockResolvedValue({
+    createIssue: mock().mockResolvedValue({
       success: true,
       issue: Promise.resolve({ id: 'linear-issue-1' }),
     }),
-    issueUpdate: mock().mockResolvedValue({ success: true }),
-    issueLabelCreate: mock().mockResolvedValue({
+    updateIssue: mock().mockResolvedValue({ success: true }),
+    createIssueLabel: mock().mockResolvedValue({
       success: true,
       issueLabel: Promise.resolve({
         id: 'linear-label-new',
@@ -59,8 +59,8 @@ describe('LinearBridge', () => {
         labelIds: ['label-a', 'label-b'],
       });
 
-      expect(client.issueCreate).toHaveBeenCalledTimes(1);
-      const callArgs = client.issueCreate.mock.calls[0][0];
+      expect(client.createIssue).toHaveBeenCalledTimes(1);
+      const callArgs = client.createIssue.mock.calls[0][0];
       expect(callArgs.teamId).toBe(teamId);
       expect(callArgs.title).toBe('Fix server timeout');
       expect(callArgs.description).toBe('Server times out after 30s');
@@ -94,8 +94,8 @@ describe('LinearBridge', () => {
         stateId: 'ws-2',
       });
 
-      expect(client.issueUpdate).toHaveBeenCalledTimes(1);
-      expect(client.issueUpdate).toHaveBeenCalledWith('linear-issue-1', {
+      expect(client.updateIssue).toHaveBeenCalledTimes(1);
+      expect(client.updateIssue).toHaveBeenCalledWith('linear-issue-1', {
         title: 'Updated title',
         priority: 2,
         stateId: 'ws-2',
@@ -111,8 +111,8 @@ describe('LinearBridge', () => {
       await bridge.deleteIssue('linear-issue-1');
 
       // Must use issueUpdate, NOT issueDelete -- Linear trashes, not deletes
-      expect(client.issueUpdate).toHaveBeenCalledTimes(1);
-      expect(client.issueUpdate).toHaveBeenCalledWith('linear-issue-1', {
+      expect(client.updateIssue).toHaveBeenCalledTimes(1);
+      expect(client.updateIssue).toHaveBeenCalledWith('linear-issue-1', {
         trashed: true,
       });
     });
@@ -127,7 +127,7 @@ describe('LinearBridge', () => {
 
       const labelId = await bridge.ensureLabel('homelab');
 
-      expect(client.issueLabelCreate).toHaveBeenCalledTimes(1);
+      expect(client.createIssueLabel).toHaveBeenCalledTimes(1);
       expect(labelId).toBe('linear-label-new');
     });
 
@@ -144,7 +144,7 @@ describe('LinearBridge', () => {
 
       expect(labelId).toBe('existing-label');
       // Should NOT have called create
-      expect(client.issueLabelCreate).not.toHaveBeenCalled();
+      expect(client.createIssueLabel).not.toHaveBeenCalled();
     });
 
     it('caches labels so second call for same name does not re-fetch', async () => {
@@ -160,7 +160,7 @@ describe('LinearBridge', () => {
 
       // issueLabels should be called at most once (for initial fetch)
       // The second call should use the cache
-      expect(client.issueLabelCreate).not.toHaveBeenCalled();
+      expect(client.createIssueLabel).not.toHaveBeenCalled();
     });
   });
 

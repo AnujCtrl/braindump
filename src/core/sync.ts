@@ -34,9 +34,28 @@ export class SyncEngine {
               this.store.removeSyncAction(action.id);
               break;
             }
-            const linearId = await this.bridge.createIssue(
-              action.payload as Parameters<LinearBridge['createIssue']>[0],
-            );
+            // Resolve tags + source → Linear label IDs
+            const allLabels = [...todo.tags];
+            if (todo.source && todo.source !== 'cli' && !allLabels.includes(todo.source)) {
+              allLabels.push(todo.source);
+            }
+            const labelIds: string[] = [];
+            for (const tag of allLabels) {
+              try {
+                const labelId = await this.bridge.ensureLabel(tag);
+                labelIds.push(labelId);
+              } catch {
+                // Skip labels that fail — don't block the create
+              }
+            }
+
+            const linearId = await this.bridge.createIssue({
+              title: todo.text,
+              description: todo.notes.join('\n'),
+              priority: todo.urgent ? 1 : todo.important ? 2 : 0,
+              labelIds,
+              ...action.payload,
+            });
             // Best-effort update — UNIQUE constraint may fail in edge cases (e.g., tests)
             // but the issue was created in Linear, so always remove the action.
             try {

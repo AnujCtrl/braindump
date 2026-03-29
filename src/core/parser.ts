@@ -7,8 +7,8 @@
 //   token     = tag | source | urgent | important | note
 //   tag       = "#" word
 //   source    = "@" word
-//   urgent    = "!!"
-//   important = "!!!"
+//   urgent    = "^^"
+//   important = "^^^"
 //   note      = "--note" quoted_string | "--note" word
 //   escape    = "\#" (literal # in text)
 //   separator = "--" (everything after " -- " is plain text)
@@ -165,12 +165,9 @@ export function parseCapture(input: string): ParsedCapture {
   const textWords: string[] = [];
 
   for (const tok of tokens) {
-    // Normalize shell-escaped exclamation marks: \! → !
-    const normTok = tok.replace(/\\!/g, '!');
-
-    if (normTok === '!!!') {
+    if (tok === '^^^') {
       important = true;
-    } else if (normTok === '!!') {
+    } else if (tok === '^^') {
       urgent = true;
     } else if (tok.startsWith('#')) {
       // Tag token

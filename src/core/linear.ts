@@ -22,7 +22,7 @@ export class LinearBridge {
     stateId?: string;
     labelIds?: string[];
   }): Promise<string> {
-    const result = await this.client.issueCreate({
+    const result = await this.client.createIssue({
       teamId: this.teamId,
       title: opts.title,
       description: opts.description,
@@ -35,11 +35,11 @@ export class LinearBridge {
   }
 
   async updateIssue(linearId: string, fields: Record<string, unknown>): Promise<void> {
-    await this.client.issueUpdate(linearId, fields);
+    await this.client.updateIssue(linearId, fields);
   }
 
   async deleteIssue(linearId: string): Promise<void> {
-    await this.client.issueUpdate(linearId, { trashed: true });
+    await this.client.updateIssue(linearId, { trashed: true });
   }
 
   async ensureLabel(name: string): Promise<string> {
@@ -54,7 +54,7 @@ export class LinearBridge {
       return existing.id;
     }
 
-    const created = await this.client.issueLabelCreate({ teamId: this.teamId, name });
+    const created = await this.client.createIssueLabel({ teamId: this.teamId, name });
     const label = await created.issueLabel;
     this.labelCache.set(name, label.id);
     return label.id;

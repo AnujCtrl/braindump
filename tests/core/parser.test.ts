@@ -10,8 +10,8 @@
 //   token     = tag | source | urgent | important | note
 //   tag       = "#" word
 //   source    = "@" word
-//   urgent    = "!!"
-//   important = "!!!"
+//   urgent    = "^^"
+//   important = "^^^"
 //   note      = "--note" quoted_string | "--note" word
 //   escape    = "\#" (literal # in text)
 //   separator = "--" (everything after is text)
@@ -62,7 +62,7 @@ describe('tokenize', () => {
   });
 
   it('preserves special characters within tokens', () => {
-    expect(tokenize('#tag @source !!')).toEqual(['#tag', '@source', '!!']);
+    expect(tokenize('#tag @source ^^')).toEqual(['#tag', '@source', '^^']);
   });
 });
 
@@ -131,39 +131,38 @@ describe('parseCapture', () => {
 
   // -- Urgent / Important --
 
-  it('sets urgent=true for !! (exactly two bangs)', () => {
-    const result = parseCapture('fix server !!');
+  it('sets urgent=true for ^^ (exactly two carets)', () => {
+    const result = parseCapture('fix server ^^');
     expect(result.urgent).toBe(true);
     expect(result.important).toBe(false);
     expect(result.text).toBe('fix server');
   });
 
-  it('sets important=true for !!! (exactly three bangs)', () => {
-    const result = parseCapture('fix server !!!');
+  it('sets important=true for ^^^ (exactly three carets)', () => {
+    const result = parseCapture('fix server ^^^');
     expect(result.important).toBe(true);
     expect(result.urgent).toBe(false);
     expect(result.text).toBe('fix server');
   });
 
   it('sets both urgent and important when both are present', () => {
-    const result = parseCapture('fix server !! !!!');
+    const result = parseCapture('fix server ^^ ^^^');
     expect(result.urgent).toBe(true);
     expect(result.important).toBe(true);
   });
 
-  it('treats single ! as plain text, not a flag', () => {
-    const result = parseCapture('wow! that is great');
+  it('treats single ^ as plain text, not a flag', () => {
+    const result = parseCapture('wow^ that is great');
     expect(result.urgent).toBe(false);
     expect(result.important).toBe(false);
-    expect(result.text).toContain('wow!');
+    expect(result.text).toContain('wow^');
   });
 
-  it('treats !!!! (four bangs) as plain text, not urgent or important', () => {
-    // Only exactly 2 or exactly 3 bangs are special tokens
-    const result = parseCapture('!!!!');
+  it('treats ^^^^ (four carets) as plain text, not urgent or important', () => {
+    const result = parseCapture('^^^^');
     expect(result.urgent).toBe(false);
     expect(result.important).toBe(false);
-    expect(result.text).toContain('!!!!');
+    expect(result.text).toContain('^^^^');
   });
 
   // -- Escaped hash --
@@ -183,8 +182,8 @@ describe('parseCapture', () => {
   // -- Double-dash separator --
 
   it('treats everything after " -- " as plain text', () => {
-    const result = parseCapture('capture this -- #not-a-tag !! @not-source');
-    expect(result.text).toBe('capture this #not-a-tag !! @not-source');
+    const result = parseCapture('capture this -- #not-a-tag ^^ @not-source');
+    expect(result.text).toBe('capture this #not-a-tag ^^ @not-source');
     expect(result.tags).toEqual([]);
     expect(result.urgent).toBe(false);
     expect(result.source).toBeNull();
@@ -222,26 +221,11 @@ describe('parseCapture', () => {
     expect(result.notes).toEqual([]);
   });
 
-  // -- Shell-escaped bangs --
-
-  it('handles shell-escaped bangs \\!\\! as urgent', () => {
-    // When bash escapes !, the parser receives \!\!
-    const result = parseCapture('fix server \\!\\!');
-    expect(result.urgent).toBe(true);
-    expect(result.text).toBe('fix server');
-  });
-
-  it('handles shell-escaped bangs \\!\\!\\! as important', () => {
-    const result = parseCapture('fix server \\!\\!\\!');
-    expect(result.important).toBe(true);
-    expect(result.text).toBe('fix server');
-  });
-
   // -- Combined tokens --
 
   it('parses all token types in a single input', () => {
     const result = parseCapture(
-      '#homelab fix the DNS @minecraft !! --note "urgent fix" !!!'
+      '#homelab fix the DNS @minecraft ^^ --note "urgent fix" ^^^'
     );
     expect(result.text).toBe('fix the DNS');
     expect(result.tags).toEqual(['homelab']);
@@ -260,7 +244,7 @@ describe('parseCapture', () => {
   // -- Edge cases --
 
   it('returns empty text for input with only tokens', () => {
-    const result = parseCapture('#work @cli !!');
+    const result = parseCapture('#work @cli ^^');
     expect(result.text).toBe('');
     expect(result.tags).toEqual(['work']);
     expect(result.source).toBe('cli');
@@ -323,8 +307,8 @@ describe('parseCapture', () => {
 
   // Protects: "-- " at start means everything is plain text, including tokens.
   it('"-- " at start of input treats entire rest as plain text', () => {
-    const result = parseCapture('-- #tag @source !! !!!');
-    expect(result.text).toBe('#tag @source !! !!!');
+    const result = parseCapture('-- #tag @source ^^ ^^^');
+    expect(result.text).toBe('#tag @source ^^ ^^^');
     expect(result.tags).toEqual([]);
     expect(result.source).toBeNull();
     expect(result.urgent).toBe(false);
@@ -333,16 +317,16 @@ describe('parseCapture', () => {
 
   // Protects: both !! and !!! present as adjacent tokens.
   // Both flags should be set independently.
-  it('adjacent !! and !!! both set their respective flags', () => {
-    const result = parseCapture('task !! !!!');
+  it('adjacent ^^ and ^^^ both set their respective flags', () => {
+    const result = parseCapture('task ^^ ^^^');
     expect(result.urgent).toBe(true);
     expect(result.important).toBe(true);
     expect(result.text).toBe('task');
   });
 
-  // Protects: !!! followed by !! (reverse order) still sets both flags.
-  it('!!! before !! still sets both flags', () => {
-    const result = parseCapture('task !!! !!');
+  // Protects: ^^^ followed by ^^ (reverse order) still sets both flags.
+  it('^^^ before ^^ still sets both flags', () => {
+    const result = parseCapture('task ^^^ ^^');
     expect(result.urgent).toBe(true);
     expect(result.important).toBe(true);
     expect(result.text).toBe('task');

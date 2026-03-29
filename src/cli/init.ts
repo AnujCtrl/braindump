@@ -130,11 +130,13 @@ export async function runInit(): Promise<void> {
         console.log(`  ✓ Alias already exists in ${rcFile}\n`);
       } else {
         appendFileSync(rcFile, `\n# braindump\n${aliasLine}\n`);
-        console.log(`  ✓ Added alias to ${rcFile}\n`);
+        console.log(`  ✓ Added alias to ${rcFile}`);
+        console.log(`  Run: source ${rcFile}\n`);
       }
     } else {
       appendFileSync(rcFile, `\n# braindump\n${aliasLine}\n`);
-      console.log(`  ✓ Created ${rcFile} with alias\n`);
+      console.log(`  ✓ Created ${rcFile} with alias`);
+      console.log(`  Run: source ${rcFile}\n`);
     }
   }
 
