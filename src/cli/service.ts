@@ -12,8 +12,7 @@ function getBinaryPath(): string {
     const which = execSync('which braindump', { encoding: 'utf-8' }).trim();
     if (which) return which;
   } catch {}
-  // Fall back to Bun.execPath (compiled binary) or process.execPath
-  return typeof Bun !== 'undefined' ? Bun.execPath : process.execPath;
+  return process.execPath;
 }
 
 function isHomebrew(): boolean {

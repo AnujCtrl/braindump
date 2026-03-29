@@ -6,7 +6,7 @@ const REPO = 'anujctrl/braindump';
 const VERSION = '2.0.0'; // Overridden at compile time via --define
 
 function getBinaryPath(): string {
-  return typeof Bun !== 'undefined' ? Bun.execPath : process.execPath;
+  return process.execPath;
 }
 
 function isHomebrew(): boolean {

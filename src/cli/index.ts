@@ -69,7 +69,7 @@ program
     const { store } = bootstrap();
     const todos = handleList(store, opts);
     for (const todo of todos) {
-      console.log(formatTodoLine(todo));
+      console.log(formatTodoLine(todo, false));
     }
     printInfo();
   });
