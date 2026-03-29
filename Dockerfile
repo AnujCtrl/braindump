@@ -1,17 +1,14 @@
-# Build stage
-FROM golang:1.25-alpine AS builder
+FROM oven/bun:1 AS builder
 WORKDIR /app
-COPY go.mod go.sum ./
-RUN go mod download
-COPY . .
-RUN CGO_ENABLED=0 go build -o /todo ./cmd/todo/
-RUN CGO_ENABLED=0 go build -o /server ./cmd/server/
+COPY package.json bun.lockb* ./
+RUN bun install --frozen-lockfile
+COPY src/ src/
+COPY tsconfig.json ./
+RUN bun build --compile src/cli/index.ts --outfile braindump
 
-# Runtime stage
-FROM alpine:3.19
-RUN apk add --no-cache tzdata nodejs npm
-COPY --from=builder /todo /usr/local/bin/todo
-COPY --from=builder /server /usr/local/bin/server
-COPY scripts/receipt-encoder/ /app/receipt-encoder/
-RUN cd /app/receipt-encoder && npm install --production
-ENTRYPOINT ["/usr/local/bin/server"]
+FROM debian:bookworm-slim
+COPY --from=builder /app/braindump /usr/local/bin/braindump
+ENV BRAINDUMP_HOME=/data
+ENV BRAINDUMP_DOCKER=1
+EXPOSE 8080
+ENTRYPOINT ["braindump", "server"]
