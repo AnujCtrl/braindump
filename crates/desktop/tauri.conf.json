@@ -1,0 +1,40 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "braindump",
+  "version": "0.1.0",
+  "identifier": "com.braindump.desktop",
+  "build": {
+    "frontendDist": "../../dist"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "capture",
+        "title": "braindump capture",
+        "width": 640,
+        "height": 220,
+        "resizable": false,
+        "decorations": false,
+        "transparent": false,
+        "alwaysOnTop": true,
+        "center": true,
+        "focus": true,
+        "visible": false,
+        "skipTaskbar": true,
+        "url": "index.html"
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "category": "Productivity",
+    "shortDescription": "Capture-first todo system",
+    "longDescription": "ADHD-friendly capture-first todo system. Hotkey-summoned window for instant capture, dashboard for processing.",
+    "targets": "all",
+    "icon": ["icons/icon.png"]
+  }
+}

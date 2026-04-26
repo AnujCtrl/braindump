@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>braindump capture</title>
+    <link rel="stylesheet" href="capture.css" />
+  </head>
+  <body>
+    <main>
+      <textarea
+        id="capture"
+        autofocus
+        rows="6"
+        placeholder="Capture a thought. Ctrl/Cmd+Enter to submit. Esc to dismiss. Lines starting with `-` split into multiple todos."
+      ></textarea>
+      <div id="status" aria-live="polite"></div>
+    </main>
+    <script type="module" src="capture.js"></script>
+  </body>
+</html>

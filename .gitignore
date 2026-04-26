@@ -32,7 +32,6 @@ go.work.sum
 
 # Node.js
 node_modules/
-dist/
 *.db
 *.db-journal
 *.db-wal
@@ -43,4 +42,7 @@ dist/
 
 # Rust
 /target/
+
+# Tauri-generated (committed via build.rs each build; do not source-control)
+crates/desktop/gen/
 

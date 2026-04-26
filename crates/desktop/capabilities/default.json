@@ -1,0 +1,10 @@
+{
+  "$schema": "../../../node_modules/@tauri-apps/cli/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Default capabilities for braindump desktop. Capture window may invoke `capture` and `info`; only the capture window has these permissions.",
+  "windows": ["capture"],
+  "permissions": [
+    "core:default",
+    "global-shortcut:default"
+  ]
+}
