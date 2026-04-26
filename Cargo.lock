@@ -306,6 +306,7 @@ dependencies = [
  "chrono",
  "directories-next",
  "reqwest 0.12.28",
+ "rusqlite",
  "serde",
  "serde_json",
  "tauri",

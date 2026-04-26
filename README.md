@@ -103,7 +103,7 @@ The v2 build is staged in 7 phases. **Phase 1 is a hard validation gate** — if
 | 4 — Mac parity | ✅ done | Mac capture + sync verified end-to-end; autostart wired |
 | 5 — Metrics | ✅ done | 4 metrics + `BiWeeklyReport` JSON envelope |
 | 6 — Android capture | ⚠️ source committed, unverified | Kotlin/Compose/Room/WorkManager. Needs Android toolchain to build |
-| 7 — Dashboard wiring | blocked | Waiting on Claude Design output |
+| 7 — Dashboard wiring | ✅ done | Claude-Design dashboard wired to live Tauri data. Ctrl+Shift+D or `--dashboard` |
 
 See [docs/plan-v2.md](docs/plan-v2.md) for full per-phase definitions of done and verification.
 

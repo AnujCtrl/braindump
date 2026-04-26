@@ -23,6 +23,19 @@
         "visible": false,
         "skipTaskbar": true,
         "url": "index.html"
+      },
+      {
+        "label": "dashboard",
+        "title": "braindump",
+        "width": 1380,
+        "height": 920,
+        "minWidth": 1100,
+        "minHeight": 720,
+        "resizable": true,
+        "decorations": true,
+        "center": true,
+        "visible": false,
+        "url": "dashboard.html"
       }
     ],
     "security": {

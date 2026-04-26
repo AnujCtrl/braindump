@@ -21,17 +21,21 @@
 //! bind = CTRL SHIFT, semicolon, exec, braindump-desktop --toggle
 //! ```
 //!
-//! ## Open work for Phase 1 validation
+//! ## Dashboard
 //!
-//! - `data_dir()` uses the OS-standard project dirs; verify on Linux that
-//!   the WAL companion files land in the right place.
-//! - The dashboard window is not wired up here — it'll be added in Phase 7
-//!   when design lands. The capture window is the gated MVP.
+//! A second window (`label: "dashboard"`, `url: dashboard.html`) hosts the
+//! Phase 7 dashboard. Open it via the [`DEFAULT_DASHBOARD_HOTKEY`] (default
+//! `Ctrl+Shift+D`) or `braindump-desktop --dashboard` from the compositor.
+//! Data flows through the `dashboard_load` / `dashboard_action` commands
+//! (see [`dashboard`] module).
 
+mod dashboard;
 mod sync_client;
 
 use anyhow::{Context, Result};
-use braindump_core::{Store, capture};
+use braindump_core::{
+    Status, Store, capture, pull_into_week, record_dashboard_open, status::transition,
+};
 use chrono::Utc;
 use serde::Serialize;
 use std::io::Write as _;
@@ -47,9 +51,11 @@ use tokio::io::AsyncReadExt as _;
 use tokio::net::UnixListener;
 use tokio::sync::Mutex as AsyncMutex;
 
-/// Default capture hotkey. Can be overridden by an env var (`BRAINDUMP_HOTKEY`)
-/// for the user's per-machine preference; respected on first launch.
+/// Default capture hotkey. Override with `BRAINDUMP_HOTKEY` per-machine.
 const DEFAULT_HOTKEY: &str = "ctrl+shift+;";
+
+/// Default dashboard hotkey. Override with `BRAINDUMP_DASHBOARD_HOTKEY`.
+const DEFAULT_DASHBOARD_HOTKEY: &str = "ctrl+shift+d";
 
 /// State held in the Tauri app. The store is an async mutex because the
 /// background sync drainer holds it across `.await` (HTTP I/O); command
@@ -114,6 +120,80 @@ async fn submit_capture(
     Ok(CaptureResult { count, last_id })
 }
 
+/// One round-trip command that hands the dashboard everything it needs to
+/// render. Saves the frontend from juggling 4 separate invokes on every
+/// open/refresh.
+#[tauri::command]
+async fn dashboard_load(state: State<'_, AppState>) -> Result<DashboardSnapshot, String> {
+    let store = state.store.lock().await;
+    let now = Utc::now();
+    record_dashboard_open(&store, now).map_err(|e| e.to_string())?;
+    let todos = dashboard::list_todos(&store, now).map_err(|e| e.to_string())?;
+    let counts = dashboard::counts(&todos);
+    let history = dashboard::history(&store, now, 28).map_err(|e| e.to_string())?;
+    let report = dashboard::report(&store, now).map_err(|e| e.to_string())?;
+    Ok(DashboardSnapshot {
+        todos,
+        counts,
+        history,
+        report,
+    })
+}
+
+#[derive(Debug, Serialize)]
+struct DashboardSnapshot {
+    todos: Vec<dashboard::DashTodo>,
+    counts: dashboard::DashCounts,
+    history: Vec<dashboard::DashHistoryDay>,
+    report: dashboard::DashReport,
+}
+
+/// Pile-row action: `done | this-week | park | revive`.
+#[tauri::command]
+async fn dashboard_action(
+    state: State<'_, AppState>,
+    id: String,
+    action: String,
+) -> Result<(), String> {
+    let mut store = state.store.lock().await;
+    let now = Utc::now();
+    let result: Result<(), anyhow::Error> = (|| -> Result<(), anyhow::Error> {
+        match action.as_str() {
+            "done" => {
+                transition(&mut store, &id, Status::Done, now)?;
+            }
+            "this-week" => {
+                pull_into_week(&mut store, &id, now)?;
+            }
+            "park" => {
+                dashboard::park_for_next_week(&mut store, &id, now)?;
+            }
+            "revive" => {
+                transition(&mut store, &id, Status::Inbox, now)?;
+            }
+            other => anyhow::bail!("unknown dashboard action: {other}"),
+        }
+        Ok(())
+    })();
+    result.map_err(|e| e.to_string())?;
+    drop(store);
+    sync_client::nudge(state.store.clone(), state.server_url.clone());
+    Ok(())
+}
+
+#[tauri::command]
+fn open_dashboard(app: AppHandle) {
+    show_dashboard(&app);
+}
+
+/// Summon the capture window from the dashboard "+ capture" button.
+#[tauri::command]
+fn open_capture(app: AppHandle) {
+    if let Some(win) = app.get_webview_window("capture") {
+        show_and_focus(&win);
+    }
+}
+
 fn data_dir() -> Result<PathBuf> {
     if let Ok(custom) = std::env::var("BRAINDUMP_DATA_DIR") {
         return Ok(PathBuf::from(custom));
@@ -135,10 +215,10 @@ fn socket_path() -> PathBuf {
     PathBuf::from("/tmp").join(format!("braindump-{user}.sock"))
 }
 
-/// Connect to a running instance and ask it to toggle. Returns an actionable
-/// error if no instance is listening — the user almost certainly forgot to
-/// start the app at login.
-fn send_toggle(path: &Path) -> Result<()> {
+/// Connect to a running instance and send a one-line IPC command (`toggle`,
+/// `dashboard`). Returns an actionable error if no instance is listening —
+/// the user almost certainly forgot to start the app at login.
+fn send_ipc(path: &Path, command: &str) -> Result<()> {
     let mut sock = StdUnixStream::connect(path).with_context(|| {
         format!(
             "no running instance at {} — is braindump-desktop running?",
@@ -146,7 +226,8 @@ fn send_toggle(path: &Path) -> Result<()> {
         )
     })?;
     sock.set_write_timeout(Some(Duration::from_secs(2)))?;
-    sock.write_all(b"toggle\n")?;
+    sock.write_all(command.as_bytes())?;
+    sock.write_all(b"\n")?;
     Ok(())
 }
 
@@ -197,6 +278,10 @@ fn spawn_socket_listener(app: AppHandle, path: PathBuf) -> Result<()> {
                         "toggle" => {
                             let handle = app.clone();
                             let _ = app.run_on_main_thread(move || toggle_capture(&handle));
+                        }
+                        "dashboard" => {
+                            let handle = app.clone();
+                            let _ = app.run_on_main_thread(move || show_dashboard(&handle));
                         }
                         other => tracing::warn!(other, "unknown ipc command"),
                     }
@@ -275,6 +360,17 @@ fn toggle_capture(app: &AppHandle) {
     }
 }
 
+/// Show the dashboard window (always show — never hide on second hotkey).
+/// Dashboards have different ergonomics than capture: you toggle capture
+/// many times a day, but you read the dashboard for minutes at a stretch.
+/// Hiding-on-toggle would feel like a glitch.
+fn show_dashboard(app: &AppHandle) {
+    if let Some(win) = app.get_webview_window("dashboard") {
+        let _ = win.show();
+        let _ = win.set_focus();
+    }
+}
+
 fn show_and_focus(win: &WebviewWindow) {
     let _ = win.show();
     let _ = win.set_focus();
@@ -310,9 +406,13 @@ fn main() -> Result<()> {
 
     let socket = socket_path();
 
-    // --toggle: forward to a running instance and exit.
+    // IPC commands forward to a running instance and exit. Order matters:
+    // a fresh launch hits the singleton check below.
     if std::env::args().any(|a| a == "--toggle") {
-        return send_toggle(&socket);
+        return send_ipc(&socket, "toggle");
+    }
+    if std::env::args().any(|a| a == "--dashboard") {
+        return send_ipc(&socket, "dashboard");
     }
 
     // Singleton check: if connect succeeds, another instance is alive.
@@ -333,6 +433,9 @@ fn main() -> Result<()> {
     let hotkey_str =
         std::env::var("BRAINDUMP_HOTKEY").unwrap_or_else(|_| DEFAULT_HOTKEY.to_owned());
     let hotkey = parse_hotkey(&hotkey_str)?;
+    let dash_hotkey_str = std::env::var("BRAINDUMP_DASHBOARD_HOTKEY")
+        .unwrap_or_else(|_| DEFAULT_DASHBOARD_HOTKEY.to_owned());
+    let dash_hotkey = parse_hotkey(&dash_hotkey_str)?;
     let server_url = server_url_from_env();
 
     let store_for_state = store.clone();
@@ -349,24 +452,40 @@ fn main() -> Result<()> {
             MacosLauncher::LaunchAgent,
             None,
         ))
-        .plugin(
+        .plugin({
+            let capture_hotkey = hotkey;
+            let dashboard_hotkey = dash_hotkey;
             tauri_plugin_global_shortcut::Builder::new()
-                .with_handler(move |app, _shortcut, event| {
-                    if event.state == ShortcutState::Pressed {
+                .with_handler(move |app, shortcut, event| {
+                    if event.state != ShortcutState::Pressed {
+                        return;
+                    }
+                    if shortcut == &capture_hotkey {
                         toggle_capture(app);
+                    } else if shortcut == &dashboard_hotkey {
+                        show_dashboard(app);
                     }
                 })
-                .build(),
-        )
-        .invoke_handler(tauri::generate_handler![submit_capture])
+                .build()
+        })
+        .invoke_handler(tauri::generate_handler![
+            submit_capture,
+            dashboard_load,
+            dashboard_action,
+            open_dashboard,
+            open_capture,
+        ])
         .setup(move |app| {
             let handle = app.handle().clone();
-            // Wayland note: this register() will return Err on Hyprland (and
-            // most other Wayland compositors). We log + ignore so the app
-            // still starts; the user is expected to configure the compositor
-            // bind → `braindump-desktop --toggle`.
+            // Wayland note: register() returns Err on Hyprland and most
+            // Wayland compositors. We log + ignore so the app still starts;
+            // the user is expected to configure compositor binds →
+            // `braindump-desktop --toggle` / `--dashboard`.
             if let Err(e) = handle.global_shortcut().register(hotkey) {
-                tracing::warn!(error = %e, "global shortcut registration failed (expected on Wayland — use --toggle from the compositor binding)");
+                tracing::warn!(error = %e, "capture global shortcut registration failed (expected on Wayland — use --toggle)");
+            }
+            if let Err(e) = handle.global_shortcut().register(dash_hotkey) {
+                tracing::warn!(error = %e, "dashboard global shortcut registration failed (expected on Wayland — use --dashboard)");
             }
             spawn_socket_listener(handle.clone(), socket.clone())?;
 

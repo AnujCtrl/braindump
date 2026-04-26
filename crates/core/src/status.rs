@@ -116,6 +116,9 @@ pub fn is_valid(from: Status, to: Status) -> bool {
             | (Waiting, Done)
             // Revive a stale todo
             | (Stale, Inbox)
+            // Mark a stale item done directly (dashboard ergonomics — saves
+            // the user a pointless inbox-bounce when they just want it gone).
+            | (Stale, Done)
             // Undo accidental done
             | (Done, Inbox)
             | (Done, Active)
