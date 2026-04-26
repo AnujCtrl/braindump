@@ -65,14 +65,30 @@ If two devices edit the same todo while offline, the one with the later `updated
 
 ```bash
 cargo build --workspace            # all Rust crates
-cargo run -p braindump-desktop     # desktop app stub
-cargo run -p braindump-server      # sync server stub
+cargo tauri dev --config crates/desktop/tauri.conf.json   # desktop app
+cargo run -p braindump-server      # sync server
 cargo test --workspace             # all tests
 cargo clippy --workspace -- -D warnings
 cargo fmt --all
 ```
 
-CI runs fmt, clippy, and tests on every PR — see [`.github/workflows/rust.yml`](.github/workflows/rust.yml).
+CI runs fmt, clippy, tests, and a launch smoke test for the desktop binary — see [`.github/workflows/rust.yml`](.github/workflows/rust.yml).
+
+## Capture hotkey
+
+The desktop app registers `Ctrl+Shift+;` by default (override with `BRAINDUMP_HOTKEY=...`).
+
+**macOS** uses Tauri's native global shortcut. First run, grant Accessibility permission when prompted.
+
+**Linux/Hyprland (Wayland)** can't use a native global shortcut — Wayland's security model refuses system-wide key registration. Use the compositor binding instead:
+
+```hyprland
+# ~/.config/hypr/hyprland.conf
+exec-once = braindump-desktop
+bind = CTRL SHIFT, semicolon, exec, braindump-desktop --toggle
+```
+
+`--toggle` connects to the running instance over a Unix socket (`$XDG_RUNTIME_DIR/braindump.sock`) and asks it to show/hide. Same pattern works on any tiling WM with `bind`/`exec` directives.
 
 ## Phase status
 
