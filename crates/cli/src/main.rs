@@ -84,7 +84,10 @@ fn cmd_dump(store: &mut Store, input: &str) -> Result<()> {
     let mut count = 0;
     for line in input.lines() {
         let trimmed = line.trim();
-        let item = trimmed.strip_prefix('-').map(str::trim_start).unwrap_or(trimmed);
+        let item = trimmed
+            .strip_prefix('-')
+            .map(str::trim_start)
+            .unwrap_or(trimmed);
         if item.is_empty() {
             continue;
         }

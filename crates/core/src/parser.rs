@@ -161,10 +161,7 @@ fn extract_note(s: &str) -> (String, Option<String>) {
         }
     } else {
         match after.find(' ') {
-            Some(space) => (
-                after[..space].to_owned(),
-                after[space + 1..].to_owned(),
-            ),
+            Some(space) => (after[..space].to_owned(), after[space + 1..].to_owned()),
             None => (after.to_owned(), String::new()),
         }
     };
@@ -337,11 +334,15 @@ mod tests {
 
     #[test]
     fn complex_real_world_capture() {
-        let p =
-            parse("fix the nether portal #minecraft #deep-focus @cli ^^ --note \"obsidian needed\"")
-                .unwrap();
+        let p = parse(
+            "fix the nether portal #minecraft #deep-focus @cli ^^ --note \"obsidian needed\"",
+        )
+        .unwrap();
         assert_eq!(p.text, "fix the nether portal");
-        assert_eq!(p.tags, vec!["minecraft".to_owned(), "deep-focus".to_owned()]);
+        assert_eq!(
+            p.tags,
+            vec!["minecraft".to_owned(), "deep-focus".to_owned()]
+        );
         assert_eq!(p.source.as_deref(), Some("cli"));
         assert!(p.urgent);
         assert!(!p.important);

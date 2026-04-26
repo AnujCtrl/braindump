@@ -127,10 +127,7 @@ pub fn capture(
         updated_at: now,
     };
     store.insert_todo(&todo)?;
-    Ok(CaptureOutcome {
-        todo,
-        suggestions,
-    })
+    Ok(CaptureOutcome { todo, suggestions })
 }
 
 #[cfg(test)]

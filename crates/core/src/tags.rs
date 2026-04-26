@@ -30,9 +30,7 @@ where
     for tag in existing {
         let t = tag.as_ref();
         let score = normalized_damerau_levenshtein(&q, &t.to_lowercase());
-        if score >= AUTO_SUGGEST_THRESHOLD
-            && best.as_ref().is_none_or(|b| score > b.score)
-        {
+        if score >= AUTO_SUGGEST_THRESHOLD && best.as_ref().is_none_or(|b| score > b.score) {
             best = Some(TagMatch {
                 candidate: t.to_owned(),
                 score,

@@ -323,9 +323,11 @@ impl Store {
 
     /// Count items considered "looping" — gone stale 2+ times.
     pub fn count_looping(&self) -> Result<i64> {
-        Ok(self
-            .conn
-            .query_row("SELECT COUNT(*) FROM todos WHERE stale_count >= 2", [], |r| r.get(0))?)
+        Ok(self.conn.query_row(
+            "SELECT COUNT(*) FROM todos WHERE stale_count >= 2",
+            [],
+            |r| r.get(0),
+        )?)
     }
 
     // ---------- tags ----------
@@ -361,7 +363,9 @@ impl Store {
     pub fn tag_exists(&self, name: &str) -> Result<bool> {
         let count: i64 =
             self.conn
-                .query_row("SELECT COUNT(*) FROM tags WHERE name = ?", [name], |r| r.get(0))?;
+                .query_row("SELECT COUNT(*) FROM tags WHERE name = ?", [name], |r| {
+                    r.get(0)
+                })?;
         Ok(count > 0)
     }
 
@@ -382,11 +386,13 @@ impl Store {
     }
 }
 
-fn row_to_todo(row: &rusqlite::Row) -> rusqlite::Result<Todo> {
+pub(crate) fn row_to_todo(row: &rusqlite::Row<'_>) -> rusqlite::Result<Todo> {
     let status_str: String = row.get("status")?;
-    let status: Status = status_str.parse().map_err(|e: crate::model::UnknownStatus| {
-        rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
-    })?;
+    let status: Status = status_str
+        .parse()
+        .map_err(|e: crate::model::UnknownStatus| {
+            rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(e))
+        })?;
     let tags_json: String = row.get("tags")?;
     let notes_json: String = row.get("notes")?;
     let tags: Vec<String> = serde_json::from_str(&tags_json).map_err(|e| {
