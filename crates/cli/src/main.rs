@@ -1,11 +1,15 @@
 //! Hidden CLI sub-binary — dev sanity tool, not a user-facing surface.
 //!
 //! The "capture-first" UX lives in the desktop app's hotkey-summoned window.
-//! This CLI exists so the parser, storage, and capture orchestration can be
+//! This CLI exists so the parser, storage, capture orchestration, status
+//! transitions, weekly bucket, stale detector, and metrics can all be
 //! exercised end-to-end on any machine without firing up Tauri.
 
 use anyhow::Result;
-use braindump_core::{Status, Store, capture};
+use braindump_core::{
+    Status, Store, bi_weekly_report, capture, list_this_week, pull_into_week,
+    record_dashboard_open, rollover, stale, status, sunday_auto_populate,
+};
 use chrono::Utc;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -29,11 +33,9 @@ enum Cmd {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         input: Vec<String>,
     },
-    /// Capture multiple todos at once. Lines starting with `-` are split into
-    /// separate todos (the v2 dump-mode replacement for v1's interactive
-    /// `todo dump` subcommand).
+    /// Capture multiple todos at once. Lines starting with `-` are split
+    /// (the v2 dump-mode replacement for v1's interactive `todo dump`).
     Dump {
-        /// Multiline string. Each line beginning with `-` is one todo.
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         input: Vec<String>,
     },
@@ -44,10 +46,30 @@ enum Cmd {
         #[arg(long)]
         tag: Option<String>,
     },
-    /// List known tags (the v2 tag set, source of truth for #tag validation).
+    /// List items in the current week's bucket.
+    Week,
+    /// Transition a todo to a new status (validates per the state machine).
+    Transition {
+        /// Full id or 8-char short prefix.
+        id: String,
+        status: Status,
+    },
+    /// Pull a todo into the current week's bucket.
+    Pull { id: String },
+    /// Run the stale detector. Items idle past their threshold are flipped.
+    StaleTick,
+    /// Run the weekly rollover. Open prior-week items move to this week.
+    Rollover,
+    /// Run the Sunday auto-populate (no-op unless today is a Sunday).
+    Sunday,
+    /// List known tags.
     Tags,
     /// Print the info-line counts the desktop status bar will surface.
     Info,
+    /// Record a dashboard open (the return-rate metric counts these).
+    RecordOpen,
+    /// Emit the bi-weekly report as pretty JSON.
+    Report,
 }
 
 fn main() -> Result<()> {
@@ -57,9 +79,17 @@ fn main() -> Result<()> {
     match cli.cmd {
         Cmd::Capture { input } => cmd_capture(&mut store, &input.join(" ")),
         Cmd::Dump { input } => cmd_dump(&mut store, &input.join(" ")),
-        Cmd::List { status, tag } => cmd_list(&store, status, tag.as_deref()),
+        Cmd::List { status: s, tag } => cmd_list(&store, s, tag.as_deref()),
+        Cmd::Week => cmd_week(&store),
+        Cmd::Transition { id, status: s } => cmd_transition(&mut store, &id, s),
+        Cmd::Pull { id } => cmd_pull(&mut store, &id),
+        Cmd::StaleTick => cmd_stale_tick(&mut store),
+        Cmd::Rollover => cmd_rollover(&mut store),
+        Cmd::Sunday => cmd_sunday(&mut store),
         Cmd::Tags => cmd_tags(&store),
         Cmd::Info => cmd_info(&store),
+        Cmd::RecordOpen => cmd_record_open(&store),
+        Cmd::Report => cmd_report(&store),
     }
 }
 
@@ -100,41 +130,82 @@ fn cmd_dump(store: &mut Store, input: &str) -> Result<()> {
     Ok(())
 }
 
-fn cmd_list(store: &Store, status: Option<Status>, tag: Option<&str>) -> Result<()> {
-    let todos = store.list(status, tag)?;
+fn cmd_list(store: &Store, status_filter: Option<Status>, tag: Option<&str>) -> Result<()> {
+    let todos = store.list(status_filter, tag)?;
     if todos.is_empty() {
         println!("(no todos)");
         return Ok(());
     }
     for t in &todos {
-        let mark = if t.done { "x" } else { " " };
-        let prio = match (t.urgent, t.important) {
-            (true, true) => " ^^^^^",
-            (true, false) => " ^^",
-            (false, true) => " ^^^",
-            _ => "",
-        };
-        let tags: String = t
-            .tags
-            .iter()
-            .map(|x| format!("#{x}"))
-            .collect::<Vec<_>>()
-            .join(" ");
         println!(
             "- [{}] {} [{}] {}{}{}",
-            mark,
+            if t.done { "x" } else { " " },
             t.text,
             t.short_id(),
             t.status,
-            prio,
-            if tags.is_empty() {
-                String::new()
-            } else {
-                format!(" {tags}")
-            }
+            priority_str(t.urgent, t.important),
+            tags_str(&t.tags)
         );
     }
     print_info_line(store)?;
+    Ok(())
+}
+
+fn cmd_week(store: &Store) -> Result<()> {
+    let items = list_this_week(store, Utc::now())?;
+    if items.is_empty() {
+        println!("(nothing pulled into this week yet)");
+        return Ok(());
+    }
+    for t in &items {
+        println!(
+            "* {} [{}] {}{}",
+            t.text,
+            t.short_id(),
+            t.status,
+            priority_str(t.urgent, t.important)
+        );
+    }
+    Ok(())
+}
+
+fn cmd_transition(store: &mut Store, id: &str, to: Status) -> Result<()> {
+    let resolved_id = if id.len() == 36 {
+        id.to_owned()
+    } else {
+        store.get_by_short_id(id)?.id
+    };
+    let after = status::transition(store, &resolved_id, to, Utc::now())?;
+    println!("Moved [{}] to {}", after.short_id(), after.status);
+    Ok(())
+}
+
+fn cmd_pull(store: &mut Store, id: &str) -> Result<()> {
+    let resolved_id = if id.len() == 36 {
+        id.to_owned()
+    } else {
+        store.get_by_short_id(id)?.id
+    };
+    pull_into_week(store, &resolved_id, Utc::now())?;
+    println!("Pulled [{}] into this week", &resolved_id[..8]);
+    Ok(())
+}
+
+fn cmd_stale_tick(store: &mut Store) -> Result<()> {
+    let n = stale::run(store, Utc::now())?;
+    println!("Marked {n} items stale.");
+    Ok(())
+}
+
+fn cmd_rollover(store: &mut Store) -> Result<()> {
+    let r = rollover(store, Utc::now())?;
+    println!("Rolled: {} | Staled: {}", r.rolled, r.staled);
+    Ok(())
+}
+
+fn cmd_sunday(store: &mut Store) -> Result<()> {
+    let outcome = sunday_auto_populate(store, Utc::now())?;
+    println!("{outcome:?}");
     Ok(())
 }
 
@@ -149,10 +220,44 @@ fn cmd_info(store: &Store) -> Result<()> {
     print_info_line(store)
 }
 
+fn cmd_record_open(store: &Store) -> Result<()> {
+    record_dashboard_open(store, Utc::now())?;
+    println!("Recorded dashboard open.");
+    Ok(())
+}
+
+fn cmd_report(store: &Store) -> Result<()> {
+    let r = bi_weekly_report(store, Utc::now())?;
+    println!("{}", serde_json::to_string_pretty(&r)?);
+    Ok(())
+}
+
 fn print_info_line(store: &Store) -> Result<()> {
     let unprocessed = store.count_by_status(Status::Unprocessed)?;
     let active = store.count_by_status(Status::Active)?;
     let looping = store.count_looping()?;
     println!("-- Unprocessed: {unprocessed} | Active: {active} | Looping: {looping} --");
     Ok(())
+}
+
+fn priority_str(urgent: bool, important: bool) -> &'static str {
+    match (urgent, important) {
+        (true, true) => " ^^/^^^",
+        (true, false) => " ^^",
+        (false, true) => " ^^^",
+        _ => "",
+    }
+}
+
+fn tags_str(tags: &[String]) -> String {
+    if tags.is_empty() {
+        String::new()
+    } else {
+        let joined = tags
+            .iter()
+            .map(|x| format!("#{x}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        format!(" {joined}")
+    }
 }
