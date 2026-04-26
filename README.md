@@ -96,13 +96,13 @@ The v2 build is staged in 7 phases. **Phase 1 is a hard validation gate** — if
 
 | Phase | Status | Description |
 |-------|--------|-------------|
-| 0 — Repo bootstrap | **in progress** | Cargo workspace, CI, architecture diagram |
-| 1 — Linux capture loop | not started | Tauri shell, global hotkey, parser, local SQLite |
-| 2 — Logic layer | not started | Stale, rollover, "this week", Sunday auto-populate |
-| 3 — Sync server | not started | axum, push/pull, last-write-wins |
-| 4 — Mac parity | not started | Cross-platform capture + sync |
-| 5 — Metrics | not started | Bi-weekly report data structure |
-| 6 — Android capture | not started | Kotlin app, quick-settings tile, voice |
+| 0 — Repo bootstrap | ✅ done | Cargo workspace, CI, architecture diagram, smoke-launch test |
+| 1 — Linux capture loop | ✅ code done · ⏳ Linux validation pending | Tauri shell, global hotkey, parser, SQLite. IPC `--toggle` for Hyprland/Wayland |
+| 2 — Logic layer | ✅ done | Stale, rollover, "this week", Sunday auto-populate |
+| 3 — Sync server | ✅ done | axum push/pull, LWW, client drainer with backoff |
+| 4 — Mac parity | ✅ done | Mac capture + sync verified end-to-end; autostart wired |
+| 5 — Metrics | ✅ done | 4 metrics + `BiWeeklyReport` JSON envelope |
+| 6 — Android capture | ⚠️ source committed, unverified | Kotlin/Compose/Room/WorkManager. Needs Android toolchain to build |
 | 7 — Dashboard wiring | blocked | Waiting on Claude Design output |
 
 See [docs/plan-v2.md](docs/plan-v2.md) for full per-phase definitions of done and verification.
