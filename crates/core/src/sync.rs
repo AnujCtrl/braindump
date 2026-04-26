@@ -218,6 +218,145 @@ pub fn build_pull(
     })
 }
 
+/// Collect all sync_queue entries into a single push payload, deduped by
+/// `(action, id)` — multiple updates to the same todo collapse into the
+/// latest snapshot. Returns the push and the queue row IDs that should be
+/// deleted once the server confirms receipt.
+///
+/// # Errors
+///
+/// Returns [`SyncError::Sqlite`] / [`SyncError::Json`] on failure.
+pub fn pending_push(store: &Store) -> Result<(SyncPush, Vec<i64>), SyncError> {
+    let mut stmt = store
+        .conn()
+        .prepare("SELECT id, todo_id, action, payload FROM sync_queue ORDER BY id ASC")?;
+    let mut rows = stmt.query([])?;
+
+    let mut row_ids: Vec<i64> = Vec::new();
+    let mut latest_todos: std::collections::BTreeMap<String, Todo> =
+        std::collections::BTreeMap::new();
+    let mut latest_tags: std::collections::BTreeMap<String, SyncedTag> =
+        std::collections::BTreeMap::new();
+
+    while let Some(row) = rows.next()? {
+        let queue_id: i64 = row.get(0)?;
+        let _todo_id: String = row.get(1)?;
+        let action: String = row.get(2)?;
+        let payload: String = row.get(3)?;
+        row_ids.push(queue_id);
+
+        match action.as_str() {
+            "create" | "update" | "status_change" => {
+                if let Ok(todo) = serde_json::from_str::<Todo>(&payload) {
+                    latest_todos.insert(todo.id.clone(), todo);
+                }
+            }
+            "tag_add" => {
+                #[derive(serde::Deserialize)]
+                struct TagPayload {
+                    name: String,
+                }
+                if let Ok(p) = serde_json::from_str::<TagPayload>(&payload) {
+                    let tag_meta = store.conn().query_row(
+                        "SELECT created_at, updated_at FROM tags WHERE name = ?",
+                        [&p.name],
+                        |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)),
+                    );
+                    if let Ok((created, updated)) = tag_meta {
+                        let parse = |s: &str| {
+                            DateTime::parse_from_rfc3339(s)
+                                .map(|dt| dt.with_timezone(&Utc))
+                                .ok()
+                        };
+                        if let (Some(c), Some(u)) = (parse(&created), parse(&updated)) {
+                            latest_tags.insert(
+                                p.name.clone(),
+                                SyncedTag {
+                                    name: p.name,
+                                    created_at: c,
+                                    updated_at: u,
+                                },
+                            );
+                        }
+                    }
+                }
+            }
+            // Future actions (delete, etc.) get folded in here.
+            _ => {}
+        }
+    }
+
+    Ok((
+        SyncPush {
+            todos: latest_todos.into_values().collect(),
+            tags: latest_tags.into_values().collect(),
+        },
+        row_ids,
+    ))
+}
+
+/// Delete the given sync_queue rows. Called after the server confirms a push.
+///
+/// # Errors
+///
+/// Returns [`SyncError::Sqlite`] on failure.
+pub fn clear_queue_rows(store: &mut Store, ids: &[i64]) -> Result<(), SyncError> {
+    if ids.is_empty() {
+        return Ok(());
+    }
+    let tx = store.conn_mut().transaction()?;
+    {
+        let mut stmt = tx.prepare("DELETE FROM sync_queue WHERE id = ?")?;
+        for id in ids {
+            stmt.execute([id])?;
+        }
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+/// Read the cursor used for `/sync/pull?since=<ts>`. None means "pull
+/// everything" — a fresh client.
+///
+/// # Errors
+///
+/// Returns [`SyncError::Sqlite`] on failure.
+pub fn last_pull_cursor(store: &Store) -> Result<Option<DateTime<Utc>>, SyncError> {
+    let row: Option<String> = store
+        .conn()
+        .query_row(
+            "SELECT value FROM sync_state WHERE key = 'last_pull'",
+            [],
+            |r| r.get(0),
+        )
+        .ok();
+    match row {
+        None => Ok(None),
+        Some(s) => DateTime::parse_from_rfc3339(&s)
+            .map(|dt| Some(dt.with_timezone(&Utc)))
+            .map_err(|e| {
+                SyncError::Sqlite(rusqlite::Error::FromSqlConversionFailure(
+                    0,
+                    rusqlite::types::Type::Text,
+                    Box::new(e),
+                ))
+            }),
+    }
+}
+
+/// Persist the new cursor after a successful pull.
+///
+/// # Errors
+///
+/// Returns [`SyncError::Sqlite`] on failure.
+pub fn set_pull_cursor(store: &Store, ts: DateTime<Utc>) -> Result<(), SyncError> {
+    store.conn().execute(
+        "INSERT OR REPLACE INTO sync_state (key, value) VALUES ('last_pull', ?)",
+        params![ts.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)],
+    )?;
+    Ok(())
+}
+
 fn apply_todo_raw(tx: &rusqlite::Transaction<'_>, todo: &Todo) -> Result<(), SyncError> {
     tx.execute(
         "INSERT OR REPLACE INTO todos (

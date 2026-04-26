@@ -21,13 +21,16 @@ braindump-core = { path = "../core" }
 anyhow = { workspace = true }
 chrono = { workspace = true }
 directories-next = "2"
+reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tauri = { version = "2", features = [] }
+tauri-plugin-autostart = "2"
 tauri-plugin-global-shortcut = "2"
 tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+url = "2"
 
 [features]
 default = []

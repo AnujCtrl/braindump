@@ -32,6 +32,7 @@ pub use status::{TransitionError, transition};
 pub use storage::{Store, StoreError, SyncAction};
 pub use sync::{
     SyncError, SyncPull, SyncPush, SyncPushResponse, SyncedTag, apply_push, build_pull,
+    clear_queue_rows, last_pull_cursor, pending_push, set_pull_cursor,
 };
 pub use tags::{TagMatch, fuzzy_match};
 pub use weekly::{

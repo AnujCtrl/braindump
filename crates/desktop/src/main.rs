@@ -28,6 +28,8 @@
 //! - The dashboard window is not wired up here — it'll be added in Phase 7
 //!   when design lands. The capture window is the gated MVP.
 
+mod sync_client;
+
 use anyhow::{Context, Result};
 use braindump_core::{Store, capture};
 use chrono::Utc;
@@ -35,21 +37,27 @@ use serde::Serialize;
 use std::io::Write as _;
 use std::os::unix::net::{UnixListener as StdUnixListener, UnixStream as StdUnixStream};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::Arc;
 use std::time::Duration;
+use sync_client::{SharedStore, server_url_from_env};
 use tauri::{AppHandle, Manager, State, WebviewWindow};
+use tauri_plugin_autostart::{MacosLauncher, ManagerExt as _};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 use tokio::io::AsyncReadExt as _;
 use tokio::net::UnixListener;
+use tokio::sync::Mutex as AsyncMutex;
 
 /// Default capture hotkey. Can be overridden by an env var (`BRAINDUMP_HOTKEY`)
 /// for the user's per-machine preference; respected on first launch.
 const DEFAULT_HOTKEY: &str = "ctrl+shift+;";
 
-/// State held in the Tauri app — the SQLite store, behind a sync mutex
-/// because Tauri command handlers are sync (rusqlite is also sync).
+/// State held in the Tauri app. The store is an async mutex because the
+/// background sync drainer holds it across `.await` (HTTP I/O); command
+/// handlers acquire the same lock asynchronously. Single-user single-machine
+/// — contention is a non-issue.
 struct AppState {
-    store: Mutex<Store>,
+    store: SharedStore,
+    server_url: Option<url::Url>,
 }
 
 #[derive(Debug, Serialize)]
@@ -59,8 +67,11 @@ struct CaptureResult {
 }
 
 #[tauri::command]
-fn submit_capture(state: State<'_, AppState>, input: String) -> Result<CaptureResult, String> {
-    let mut store = state.store.lock().map_err(|e| e.to_string())?;
+async fn submit_capture(
+    state: State<'_, AppState>,
+    input: String,
+) -> Result<CaptureResult, String> {
+    let mut store = state.store.lock().await;
     let mut count = 0usize;
     let mut last_id: Option<String> = None;
     let now = Utc::now();
@@ -96,6 +107,9 @@ fn submit_capture(state: State<'_, AppState>, input: String) -> Result<CaptureRe
             Err(e) => return Err(e.to_string()),
         }
     }
+
+    drop(store); // release the lock before nudging the drainer
+    sync_client::nudge(state.store.clone(), state.server_url.clone());
 
     Ok(CaptureResult { count, last_id })
 }
@@ -267,6 +281,25 @@ fn show_and_focus(win: &WebviewWindow) {
     let _ = win.center();
 }
 
+/// One-shot login-item enable. Reads/writes a marker file in the data dir so
+/// we only do this once — if the user later disables autostart via the OS,
+/// we respect that decision rather than re-enabling on each launch.
+fn enable_autostart_on_first_run(app: &AppHandle) {
+    let Ok(dir) = data_dir() else { return };
+    let marker = dir.join(".autostart-initialized");
+    if marker.exists() {
+        return;
+    }
+    let manager = app.autolaunch();
+    match manager.enable() {
+        Ok(()) => {
+            tracing::info!("autostart enabled (first-run)");
+            let _ = std::fs::write(&marker, b"1");
+        }
+        Err(e) => tracing::warn!(error = %e, "could not enable autostart"),
+    }
+}
+
 fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -295,15 +328,27 @@ fn main() -> Result<()> {
     let db_path = dir.join("braindump.db");
     let store = Store::open(&db_path)?;
     tracing::info!(?db_path, "opened store");
+    let store: SharedStore = Arc::new(AsyncMutex::new(store));
 
     let hotkey_str =
         std::env::var("BRAINDUMP_HOTKEY").unwrap_or_else(|_| DEFAULT_HOTKEY.to_owned());
     let hotkey = parse_hotkey(&hotkey_str)?;
+    let server_url = server_url_from_env();
+
+    let store_for_state = store.clone();
+    let server_for_state = server_url.clone();
 
     tauri::Builder::default()
         .manage(AppState {
-            store: Mutex::new(store),
+            store: store_for_state,
+            server_url: server_for_state,
         })
+        .plugin(tauri_plugin_autostart::init(
+            // LaunchAgent on Mac, registry on Windows, .desktop on Linux.
+            // Args are passed when the OS launches us at login.
+            MacosLauncher::LaunchAgent,
+            None,
+        ))
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(move |app, _shortcut, event| {
@@ -324,6 +369,14 @@ fn main() -> Result<()> {
                 tracing::warn!(error = %e, "global shortcut registration failed (expected on Wayland — use --toggle from the compositor binding)");
             }
             spawn_socket_listener(handle.clone(), socket.clone())?;
+
+            // Best-effort: enable login-item registration on first run. The
+            // user can disable via the OS UI if they want; we don't fight
+            // that decision on subsequent launches.
+            enable_autostart_on_first_run(&handle);
+
+            // Background sync drainer — no-op if BRAINDUMP_SERVER_URL is unset.
+            sync_client::spawn(store.clone(), server_url.clone());
             Ok(())
         })
         .run(tauri::generate_context!())
