@@ -330,8 +330,37 @@ body { min-height: 100vh; }
   display: flex; align-items: center; justify-content: center;
   cursor: pointer;
   transition: all .12s;
+  position: relative;
 }
 .pile-action:hover { color: var(--text); border-color: var(--hairline); background: rgba(255, 255, 255, 0.03); }
+
+/* Hover tooltip — pulled from data-tip so we don't need extra DOM. The
+   browser's native title attr is also fine but the design language is
+   monospace + hairline panels, not the OS popover. */
+.pile-action[data-tip]:hover::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 4px);
+  right: 0;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  background: #000;
+  color: var(--text);
+  padding: 4px 8px;
+  border: 1px solid var(--hairline);
+  border-radius: 3px;
+  pointer-events: none;
+  z-index: 6;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+/* Suppress on the rightmost edge so the tooltip doesn't clip the panel.
+   Not all rows need this — applied conservatively via the last button. */
+.pile-cell.pile-actions .pile-action:last-child[data-tip]:hover::after {
+  right: auto;
+  left: 0;
+}
 .pile-empty {
   padding: 36px;
   text-align: center;

@@ -186,6 +186,9 @@ async fn dashboard_action(
             "park" => {
                 dashboard::park_for_next_week(&mut store, &id, now)?;
             }
+            "back" => {
+                dashboard::send_back_to_inbox(&mut store, &id, now)?;
+            }
             "revive" => {
                 transition(&mut store, &id, Status::Inbox, now)?;
             }

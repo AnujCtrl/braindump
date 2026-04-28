@@ -75,7 +75,7 @@ function timeOfDayFactor() {
 // Easing
 const easeInOut = (x) => x < 0.5 ? 2*x*x : 1 - Math.pow(-2*x + 2, 2) / 2;
 
-function SupplyChain({ counts, items, intensity, accent, mode, onNodeHover, onComplete }) {
+function SupplyChain({ counts, items, intensity, accent, mode, onNodeHover, onComplete, onSendBack }) {
   const canvasRef = useRef(null);
   const containerRef = useRef(null);
   const [size, setSize] = useState({ w: 1200, h: 480 });
@@ -245,13 +245,18 @@ function SupplyChain({ counts, items, intensity, accent, mode, onNodeHover, onCo
     let raf;
     let lastReal = performance.now();
 
-    // Build a "live items pool" — we'll mostly use 'this-week' status as the
-    // active queue feeding into the workstation. But ambient flow uses inbox
-    // → queue when this-week is empty.
+    // Live items pool — what the conveyor is allowed to flow.
+    //
+    // The triage discipline this dashboard wants to enforce: the user
+    // dumps into inbox, then DELIBERATELY pulls items into 'this-week'
+    // (or marks them urgent). Only those make it onto the conveyor.
+    // Plain inbox items stay in the Pile (Band 3) until the user
+    // action-clicks them up. Otherwise the brain dump becomes a flood
+    // and the dashboard reads as "everything is urgent."
     function activeItems() {
       if (!Array.isArray(items)) return [];
       const ranked = items
-        .filter(it => it.status === 'this-week' || it.status === 'inbox')
+        .filter(it => it.status === 'this-week' || (it.status === 'inbox' && it.urgent))
         .map(it => ({ ...it, _p: priorityOf(it) }));
       ranked.sort((a, b) => a._p - b._p);
       return ranked;
@@ -317,6 +322,21 @@ function SupplyChain({ counts, items, intensity, accent, mode, onNodeHover, onCo
       st.time += dt;
       const I = (intensity || 60) / 100;
       const tod = st.todFactor;
+
+      // ----- Stale-box pruning -----
+      // Drop any box whose underlying todo has left the active pool —
+      // the user marked it done elsewhere, sent it back, parked it, etc.
+      // Without this, the workstation would sit on a box that no longer
+      // corresponds to anything real. Run before any spawn/step logic.
+      const eligibleIds = new Set(activeItems().map(it => it.id));
+      const wasOnStation = st.onStation;
+      st.boxes = st.boxes.filter(b => !b.realId || eligibleIds.has(b.realId));
+      if (wasOnStation && !eligibleIds.has(wasOnStation.realId)) {
+        st.onStation = null;
+        st.stationProgress = 0;
+        st.completeRequested = false;
+      }
+      st.queue = st.queue.filter(b => eligibleIds.has(b.realId));
 
       // ----- Spawn cadence -----
       // Time-driven cadence still paces visual pulses, but spawnBox()
@@ -709,10 +729,14 @@ function SupplyChain({ counts, items, intensity, accent, mode, onNodeHover, onCo
     const rect = e.currentTarget.getBoundingClientRect();
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;
-    // Check DONE button hover first
+    // Check workstation buttons first
     const btn = stateRef.current && stateRef.current._doneBtn;
+    const backBtn = stateRef.current && stateRef.current._backBtn;
     let overBtn = false;
     if (btn && mx >= btn.x && mx <= btn.x + btn.w && my >= btn.y && my <= btn.y + btn.h) {
+      overBtn = true;
+    }
+    if (backBtn && mx >= backBtn.x && mx <= backBtn.x + backBtn.w && my >= backBtn.y && my <= backBtn.y + backBtn.h) {
       overBtn = true;
     }
     let hit = null, hitDist = 16;
@@ -738,16 +762,28 @@ function SupplyChain({ counts, items, intensity, accent, mode, onNodeHover, onCo
     const rect = e.currentTarget.getBoundingClientRect();
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;
-    const btn = stateRef.current && stateRef.current._doneBtn;
+    const st = stateRef.current;
+    const btn = st && st._doneBtn;
+    const backBtn = st && st._backBtn;
     if (btn && mx >= btn.x && mx <= btn.x + btn.w && my >= btn.y && my <= btn.y + btn.h) {
       // Fire the visual handoff (box leaves station → out-belt → drain) AND
       // tell the backend the corresponding real todo is done. Without the
       // callback the click is purely cosmetic — that's a data-loss bug, not
       // an animation bug.
-      const stn = stateRef.current.onStation;
-      stateRef.current.completeRequested = true;
+      const stn = st.onStation;
+      st.completeRequested = true;
       if (stn && stn.realId && typeof onComplete === 'function') {
         onComplete(stn.realId);
+      }
+      return;
+    }
+    if (backBtn && mx >= backBtn.x && mx <= backBtn.x + backBtn.w && my >= backBtn.y && my <= backBtn.y + backBtn.h) {
+      // BACK: notify backend; the next refetch will see status=inbox for
+      // this id, the pruner above strips the box from the simulation
+      // automatically. No animation — the workstation simply empties.
+      const stn = st.onStation;
+      if (stn && stn.realId && typeof onSendBack === 'function') {
+        onSendBack(stn.realId);
       }
     }
   }
@@ -1124,13 +1160,16 @@ function drawStation(ctx, n, st, palette, mode) {
     ctx.fillStyle = tagColor(b.tag);
     ctx.fillRect(titleX, titleY + 22, 24, 3);
 
-    // DONE button (bottom-right of pad)
+    // Action buttons (bottom-right of pad). Layout: [BACK] [MARK DONE]
     const onlyArrived = b.cellProgress >= 1;
     const btnW = 78, btnH = 22;
     const btnX = x + w - 12 - btnW;
     const btnY = padY + padH - btnH - 4;
+    const backBtnW = 56;
+    const backBtnX = btnX - backBtnW - 6;
     if (onlyArrived) {
       const pulse = 0.55 + 0.45 * Math.sin(performance.now() * 0.005);
+      // DONE — primary, accent-colored
       ctx.fillStyle = '#1d3a24';
       ctx.fillRect(btnX, btnY, btnW, btnH);
       ctx.fillStyle = `rgba(74,222,128,${0.85 * pulse + 0.15})`;
@@ -1138,7 +1177,6 @@ function drawStation(ctx, n, st, palette, mode) {
       ctx.strokeStyle = palette.good;
       ctx.lineWidth = 1;
       ctx.strokeRect(btnX + 0.5, btnY + 0.5, btnW - 1, btnH - 1);
-      // checkmark
       ctx.strokeStyle = palette.good;
       ctx.lineWidth = 2;
       ctx.beginPath();
@@ -1147,15 +1185,37 @@ function drawStation(ctx, n, st, palette, mode) {
       ctx.lineTo(btnX + 22, btnY + 6);
       ctx.stroke();
       ctx.lineWidth = 1;
-      // label
       ctx.fillStyle = palette.good;
       ctx.font = '600 11px ui-monospace, monospace';
       ctx.textAlign = 'left';
       ctx.fillText('MARK DONE', btnX + 28, btnY + btnH/2 + 4);
-      // expose for hit-testing
       st._doneBtn = { x: btnX, y: btnY, w: btnW, h: btnH };
+
+      // BACK — secondary, neutral hairline. Sends the current item back
+      // out of this-week to plain inbox. The user asked for this so an
+      // item that doesn't belong on the workstation can be demoted
+      // without forcing them to mark it done.
+      ctx.strokeStyle = '#3a3e44';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(backBtnX + 0.5, btnY + 0.5, backBtnW - 1, btnH - 1);
+      // Curved-arrow (↩) glyph drawn manually so we don't depend on a
+      // font glyph that might be missing in the WebView.
+      ctx.strokeStyle = '#9aa0a6';
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.moveTo(backBtnX + 8, btnY + 7);
+      ctx.lineTo(backBtnX + 14, btnY + btnH/2);
+      ctx.lineTo(backBtnX + 8, btnY + btnH - 7);
+      ctx.moveTo(backBtnX + 14, btnY + btnH/2);
+      ctx.lineTo(backBtnX + 22, btnY + btnH/2);
+      ctx.stroke();
+      ctx.lineWidth = 1;
+      ctx.fillStyle = '#9aa0a6';
+      ctx.font = '500 10px ui-monospace, monospace';
+      ctx.textAlign = 'left';
+      ctx.fillText('BACK', backBtnX + 26, btnY + btnH/2 + 4);
+      st._backBtn = { x: backBtnX, y: btnY, w: backBtnW, h: btnH };
     } else {
-      // box still arriving — show ghost button
       ctx.strokeStyle = '#2a2e34';
       ctx.setLineDash([2,3]);
       ctx.strokeRect(btnX + 0.5, btnY + 0.5, btnW - 1, btnH - 1);
@@ -1165,10 +1225,11 @@ function drawStation(ctx, n, st, palette, mode) {
       ctx.textAlign = 'center';
       ctx.fillText('arriving…', btnX + btnW/2, btnY + btnH/2 + 3);
       st._doneBtn = null;
+      st._backBtn = null;
     }
   } else {
     st._doneBtn = null;
-    // Idle message
+    st._backBtn = null;
     ctx.fillStyle = '#3a3e44';
     ctx.font = '11px ui-monospace, monospace';
     ctx.textAlign = 'center';

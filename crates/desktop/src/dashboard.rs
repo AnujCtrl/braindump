@@ -30,6 +30,11 @@ pub struct DashTodo {
     pub age: i64,
     /// `inbox | this-week | done | rollover | stale`.
     pub status: String,
+    /// User-applied priority flags. The conveyor uses these to decide
+    /// whether an `inbox` item is worth auto-flowing (urgent → yes,
+    /// otherwise it stays in the Pile until the user pulls it).
+    pub urgent: bool,
+    pub important: bool,
 }
 
 /// One day in the 28-day history bands.
@@ -101,6 +106,8 @@ pub fn list_todos(store: &Store, now: DateTime<Utc>) -> Result<Vec<DashTodo>, an
                     .first()
                     .cloned()
                     .unwrap_or_else(|| "untagged".to_owned()),
+                urgent: t.urgent,
+                important: t.important,
                 t: t.text,
                 src: t.source,
                 status: dash_status,
@@ -266,6 +273,35 @@ fn median_i64(xs: &[i64]) -> i64 {
     }
 }
 
+/// Send a todo back to plain inbox: remove from any weekly bucket, and if
+/// it had been promoted to `Active` (the v2 status the workstation shows)
+/// transition it back to `Inbox`. Idempotent — calling on an already-inbox
+/// todo just clears its weekly assignments (a no-op in that case).
+pub fn send_back_to_inbox(
+    store: &mut Store,
+    todo_id: &str,
+    now: DateTime<Utc>,
+) -> Result<(), anyhow::Error> {
+    // Clear from both this-week and next-week buckets. We don't restrict by
+    // week_start because a "back" intent should fully untangle the item.
+    store.conn().execute(
+        "DELETE FROM weekly_assignments WHERE todo_id = ?",
+        params![todo_id],
+    )?;
+
+    // If the underlying status had been Active (e.g. user pulled it onto
+    // the workstation), demote back to Inbox via the validated transition
+    // path so updated_at + sync_queue stay correct. Done / Stale / Inbox
+    // are left untouched — sending an already-inbox item back is a no-op.
+    if let Some(todo) = store.get(todo_id)?
+        && matches!(todo.status, Status::Active | Status::Waiting)
+    {
+        braindump_core::status::transition(store, todo_id, Status::Inbox, now)?;
+    }
+    store.log_event("send_back", Some(todo_id), &serde_json::json!({}), now)?;
+    Ok(())
+}
+
 /// Park a todo into next week's bucket — the design's "rollover" action.
 pub fn park_for_next_week(
     store: &mut Store,
@@ -346,6 +382,18 @@ mod tests {
         status: Status,
         created_at: DateTime<Utc>,
     ) -> Todo {
+        seed_with(store, id, text, status, created_at, false, false)
+    }
+
+    fn seed_with(
+        store: &mut Store,
+        id: &str,
+        text: &str,
+        status: Status,
+        created_at: DateTime<Utc>,
+        urgent: bool,
+        important: bool,
+    ) -> Todo {
         let t = Todo {
             id: id.to_owned(),
             text: text.to_owned(),
@@ -353,8 +401,8 @@ mod tests {
             status,
             created_at,
             status_changed_at: created_at,
-            urgent: false,
-            important: false,
+            urgent,
+            important,
             stale_count: 0,
             tags: vec!["work".to_owned()],
             notes: Vec::new(),
@@ -467,6 +515,75 @@ mod tests {
     }
 
     #[test]
+    fn dash_todo_carries_urgent_important() {
+        let mut store = Store::open_in_memory().unwrap();
+        let now = at("2026-04-22T12:00:00Z");
+        seed_with(
+            &mut store,
+            "77777777-0000-0000-0000-000000000000",
+            "urgent inbox item",
+            Status::Inbox,
+            now,
+            true, // urgent
+            false,
+        );
+        seed_with(
+            &mut store,
+            "88888888-0000-0000-0000-000000000000",
+            "calm inbox item",
+            Status::Inbox,
+            now,
+            false,
+            false,
+        );
+        let todos = list_todos(&store, now).unwrap();
+        let urgent = todos.iter().find(|t| t.t == "urgent inbox item").unwrap();
+        let calm = todos.iter().find(|t| t.t == "calm inbox item").unwrap();
+        assert!(urgent.urgent);
+        assert!(!calm.urgent);
+        // Wire-format check: serde defaults to snake_case for these new
+        // fields. JS reads `it.urgent`, so any rename here breaks the
+        // conveyor's filter silently — pin it.
+        let v = serde_json::to_value(urgent).unwrap();
+        assert_eq!(v["urgent"], true);
+        assert_eq!(v["important"], false);
+    }
+
+    #[test]
+    fn send_back_clears_weekly_assignment() {
+        let mut store = Store::open_in_memory().unwrap();
+        let now = at("2026-04-22T12:00:00Z");
+        let id = "99999999-0000-0000-0000-000000000000";
+        seed(&mut store, id, "pulled then back", Status::Inbox, now);
+        pull_into_week(&mut store, id, now).unwrap();
+        // Confirm it's in this-week first.
+        let pulled = list_todos(&store, now).unwrap();
+        assert_eq!(
+            pulled.iter().find(|t| t.id == id).unwrap().status,
+            "this-week"
+        );
+        // Send back.
+        send_back_to_inbox(&mut store, id, now).unwrap();
+        let after = list_todos(&store, now).unwrap();
+        assert_eq!(after.iter().find(|t| t.id == id).unwrap().status, "inbox");
+    }
+
+    #[test]
+    fn send_back_demotes_active_to_inbox() {
+        let mut store = Store::open_in_memory().unwrap();
+        let now = at("2026-04-22T12:00:00Z");
+        let id = "aaaa1111-0000-0000-0000-000000000000";
+        // Seed as Inbox, then transition to Active so the validator path
+        // is exercised (Inbox → Active is allowed).
+        seed(&mut store, id, "active item", Status::Inbox, now);
+        braindump_core::status::transition(&mut store, id, Status::Active, now).unwrap();
+        // Now send back.
+        send_back_to_inbox(&mut store, id, now).unwrap();
+        let after = store.get(id).unwrap().unwrap();
+        assert_eq!(after.status, Status::Inbox);
+    }
+
+    #[test]
     fn park_for_next_week_marks_rollover() {
         let mut store = Store::open_in_memory().unwrap();
         let now = at("2026-04-22T12:00:00Z");
@@ -492,6 +609,8 @@ mod tests {
             src: "android".into(),
             age: 3,
             status: "inbox".into(),
+            urgent: false,
+            important: false,
         };
         let v = serde_json::to_value(&t).unwrap();
         assert_eq!(v["t"], "buy milk");

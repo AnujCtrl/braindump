@@ -157,6 +157,21 @@ function App() {
     }
   };
 
+  // SupplyChain workstation BACK — demote the item out of this-week back
+  // to plain inbox. Used when the user realizes the on-station item
+  // doesn't actually belong on the conveyor right now.
+  const onWorkstationBack = async (realId) => {
+    try {
+      await invoke('dashboard_action', { id: realId, action: 'back' });
+      setLoadError(null);
+    } catch (e) {
+      console.error('workstation back failed', e);
+      setLoadError(`could not send back: ${String(e)}`);
+    } finally {
+      refetch();
+    }
+  };
+
   const onCapture = () => {
     invoke('open_capture').catch((e) => console.error('open_capture failed', e));
   };
@@ -283,6 +298,7 @@ function App() {
             mode="stylized"
             onNodeHover={setHoverNode}
             onComplete={onWorkstationComplete}
+            onSendBack={onWorkstationBack}
           />
         </div>
 
