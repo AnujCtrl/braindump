@@ -44,7 +44,7 @@ class SyncRepository(
     suspend fun capture(text: String, source: String = "android"): TodoEntity {
         val now = nowRfc3339()
         val parsed = CaptureParser.parse(text)
-        val bodyText = parsed?.text?.ifEmpty { text.trim() } ?: text.trim()
+        val bodyText = parsed?.text ?: text.trim()
         val tags = parsed?.tags ?: listOf("braindump")
         val notes = parsed?.notes ?: emptyList()
         val captureSource = parsed?.source ?: source
