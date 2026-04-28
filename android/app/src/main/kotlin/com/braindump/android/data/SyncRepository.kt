@@ -43,17 +43,20 @@ class SyncRepository(
     /** Capture a single todo. Returns the resulting Todo. */
     suspend fun capture(text: String, source: String = "android"): TodoEntity {
         val now = nowRfc3339()
-        val tags = listOf("braindump")
-        val notes = emptyList<String>()
+        val parsed = CaptureParser.parse(text)
+        val bodyText = parsed?.text?.ifEmpty { text.trim() } ?: text.trim()
+        val tags = parsed?.tags ?: listOf("braindump")
+        val notes = parsed?.notes ?: emptyList()
+        val captureSource = parsed?.source ?: source
         val todo = TodoEntity(
             id = java.util.UUID.randomUUID().toString(),
-            text = text.trim(),
-            source = source,
+            text = bodyText,
+            source = captureSource,
             status = "inbox",
             createdAt = now,
             statusChangedAt = now,
-            urgent = false,
-            important = false,
+            urgent = parsed?.urgent ?: false,
+            important = parsed?.important ?: false,
             staleCount = 0,
             tagsJson = json.encodeToString(stringListSerializer, tags),
             notesJson = json.encodeToString(stringListSerializer, notes),
