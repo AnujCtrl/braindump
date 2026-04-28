@@ -257,47 +257,60 @@ function SupplyChain({ counts, items, intensity, accent, mode, onNodeHover }) {
       return ranked;
     }
 
-    // Spawn a new box at intake. Pulls a real item if available; falls back to
-    // a placeholder so the simulation never stalls visually.
+    // Spawn a new box at intake from the live items pool.
+    //
+    // Real-data discipline:
+    //   1. Never fabricate a placeholder — if no real items are eligible
+    //      (e.g. empty inbox + nothing in this-week), no box. The original
+    //      design's "pending capture" fallback was a mocked-data crutch
+    //      that read like real captures continuously appearing.
+    //   2. Deduplicate by real id — one box per real item at a time. Lets
+    //      the user mentally track a specific todo through the line.
+    //
+    // Returns true if a box was spawned, false otherwise. The spawn loop
+    // breaks on `false` so we don't spin trying to spawn an empty pool.
     function spawnBox() {
       const items = activeItems();
-      let title, tag, age, klass;
-      if (items.length > 0) {
-        // Weight pick toward higher-priority classes so the user sees urgent
-        // items show up at the workstation more often.
-        const weights = items.map(it => {
-          const k = priorityClass(it);
-          return k === 'urgent' ? 5 : k === 'important' ? 3 : k === 'normal' ? 2 : 1;
-        });
-        const total = weights.reduce((a,b) => a + b, 0);
-        let r = Math.random() * total, idx = 0;
-        for (let i = 0; i < weights.length; i++) {
-          r -= weights[i];
-          if (r <= 0) { idx = i; break; }
-        }
-        const it = items[idx];
-        title = it.t; tag = it.tag; age = it.age;
-        klass = priorityClass(it);
-      } else {
-        title = 'pending capture'; tag = 'idea'; age = 1; klass = 'low';
+      if (items.length === 0) return false;
+
+      const inFlight = new Set(st.boxes.map(b => b.realId).filter(Boolean));
+      const eligible = items.filter(it => !inFlight.has(it.id));
+      if (eligible.length === 0) return false;
+
+      // Weight pick toward higher-priority classes so the user sees urgent
+      // items show up at the workstation more often.
+      const weights = eligible.map(it => {
+        const k = priorityClass(it);
+        return k === 'urgent' ? 5 : k === 'important' ? 3 : k === 'normal' ? 2 : 1;
+      });
+      const total = weights.reduce((a, b) => a + b, 0);
+      let r = Math.random() * total, idx = 0;
+      for (let i = 0; i < weights.length; i++) {
+        r -= weights[i];
+        if (r <= 0) { idx = i; break; }
       }
+      const it = eligible[idx];
+      const klass = priorityClass(it);
       const box = {
-        id: 'b' + Math.random().toString(36).slice(2,8),
-        title, tag, age, klass,
-        priority: priorityOf({tag, age}),
+        id: 'b' + Math.random().toString(36).slice(2, 8),
+        realId: it.id,
+        title: it.t,
+        tag: it.tag,
+        age: it.age,
+        klass,
+        priority: priorityOf(it),
         // location state machine
-        loc: 'beltIn', cell: 0, // current cell index (integer)
+        loc: 'beltIn', cell: 0,
         targetCell: 0,
-        cellProgress: 1,        // 0..1 between previous and target cell
-        stepDuration: 0.35,     // seconds per cell step
+        cellProgress: 1,
+        stepDuration: 0.35,
         stamped: false,
-        stallPulse: 0,          // 0..1 visual when stalled
-        // for queue rendering
+        stallPulse: 0,
         queueSlot: -1,
-        // for station rendering
-        bornAt: st.time
+        bornAt: st.time,
       };
       st.boxes.push(box);
+      return true;
     }
 
     function step(dt) {
@@ -306,18 +319,19 @@ function SupplyChain({ counts, items, intensity, accent, mode, onNodeHover }) {
       const tod = st.todFactor;
 
       // ----- Spawn cadence -----
-      // Step duration is fixed; we control how fast new boxes enter.
-      const spawnHz = 0.35 * I * tod;  // boxes/sec
+      // Time-driven cadence still paces visual pulses, but spawnBox()
+      // refuses if there's no real eligible item (empty pool or every
+      // real item is already on the line). That's how we keep the
+      // simulation honest without losing the factory rhythm.
+      const spawnHz = 0.35 * I * tod;
       st.spawnAccum += dt * spawnHz;
       while (st.spawnAccum >= 1) {
         st.spawnAccum -= 1;
-        // Only spawn if first-cell of beltIn is free
         const occ = st.boxes.find(b => b.loc === 'beltIn' && b.cell === 0 && b.cellProgress >= 0.85);
-        if (!occ) {
-          spawnBox();
-          st.intakeFlash = 1;
-          st.intake = st.intake * 0.85 + 1;
-        }
+        if (occ) continue;
+        if (!spawnBox()) break; // no real items to draw from this tick
+        st.intakeFlash = 1;
+        st.intake = st.intake * 0.85 + 1;
       }
       st.intake *= Math.exp(-dt * 0.4);
       st.drain *= Math.exp(-dt * 0.4);

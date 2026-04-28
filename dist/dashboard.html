@@ -89,6 +89,9 @@ function App() {
   }, []);
 
   React.useEffect(() => {
+    // Record one dashboard-open per session. Polling refresh below does NOT
+    // re-log this — return-rate counts visits, not refreshes.
+    invoke('dashboard_record_open').catch(() => {});
     refetch();
     // Cheap polling — supply-chain belts run continuously and feel right
     // when the underlying numbers refresh on a similar cadence.

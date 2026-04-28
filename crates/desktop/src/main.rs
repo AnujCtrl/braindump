@@ -123,11 +123,15 @@ async fn submit_capture(
 /// One round-trip command that hands the dashboard everything it needs to
 /// render. Saves the frontend from juggling 4 separate invokes on every
 /// open/refresh.
+///
+/// Does **not** log a `dashboard_open` event — call [`dashboard_record_open`]
+/// once per session for that. Otherwise the 15s polling refresh would
+/// pollute the return-rate metric (technically harmless because it dedupes
+/// by day, but visually noisy in the events table).
 #[tauri::command]
 async fn dashboard_load(state: State<'_, AppState>) -> Result<DashboardSnapshot, String> {
     let store = state.store.lock().await;
     let now = Utc::now();
-    record_dashboard_open(&store, now).map_err(|e| e.to_string())?;
     let todos = dashboard::list_todos(&store, now).map_err(|e| e.to_string())?;
     let counts = dashboard::counts(&todos);
     let history = dashboard::history(&store, now, 28).map_err(|e| e.to_string())?;
@@ -138,6 +142,13 @@ async fn dashboard_load(state: State<'_, AppState>) -> Result<DashboardSnapshot,
         history,
         report,
     })
+}
+
+/// Log one dashboard-open event. Frontend calls this once on mount.
+#[tauri::command]
+async fn dashboard_record_open(state: State<'_, AppState>) -> Result<(), String> {
+    let store = state.store.lock().await;
+    record_dashboard_open(&store, Utc::now()).map_err(|e| e.to_string())
 }
 
 #[derive(Debug, Serialize)]
@@ -471,6 +482,7 @@ fn main() -> Result<()> {
         .invoke_handler(tauri::generate_handler![
             submit_capture,
             dashboard_load,
+            dashboard_record_open,
             dashboard_action,
             open_dashboard,
             open_capture,
