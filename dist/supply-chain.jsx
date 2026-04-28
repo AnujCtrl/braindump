@@ -75,7 +75,7 @@ function timeOfDayFactor() {
 // Easing
 const easeInOut = (x) => x < 0.5 ? 2*x*x : 1 - Math.pow(-2*x + 2, 2) / 2;
 
-function SupplyChain({ counts, items, intensity, accent, mode, onNodeHover }) {
+function SupplyChain({ counts, items, intensity, accent, mode, onNodeHover, onComplete }) {
   const canvasRef = useRef(null);
   const containerRef = useRef(null);
   const [size, setSize] = useState({ w: 1200, h: 480 });
@@ -740,7 +740,15 @@ function SupplyChain({ counts, items, intensity, accent, mode, onNodeHover }) {
     const my = e.clientY - rect.top;
     const btn = stateRef.current && stateRef.current._doneBtn;
     if (btn && mx >= btn.x && mx <= btn.x + btn.w && my >= btn.y && my <= btn.y + btn.h) {
+      // Fire the visual handoff (box leaves station → out-belt → drain) AND
+      // tell the backend the corresponding real todo is done. Without the
+      // callback the click is purely cosmetic — that's a data-loss bug, not
+      // an animation bug.
+      const stn = stateRef.current.onStation;
       stateRef.current.completeRequested = true;
+      if (stn && stn.realId && typeof onComplete === 'function') {
+        onComplete(stn.realId);
+      }
     }
   }
 

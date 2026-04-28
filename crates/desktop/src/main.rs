@@ -135,12 +135,14 @@ async fn dashboard_load(state: State<'_, AppState>) -> Result<DashboardSnapshot,
     let todos = dashboard::list_todos(&store, now).map_err(|e| e.to_string())?;
     let counts = dashboard::counts(&todos);
     let history = dashboard::history(&store, now, 28).map_err(|e| e.to_string())?;
-    let report = dashboard::report(&store, now).map_err(|e| e.to_string())?;
+    let report = dashboard::report(&store, now, &history).map_err(|e| e.to_string())?;
+    let is_report_day = braindump_core::is_report_day(now);
     Ok(DashboardSnapshot {
         todos,
         counts,
         history,
         report,
+        is_report_day,
     })
 }
 
@@ -152,11 +154,16 @@ async fn dashboard_record_open(state: State<'_, AppState>) -> Result<(), String>
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct DashboardSnapshot {
     todos: Vec<dashboard::DashTodo>,
     counts: dashboard::DashCounts,
     history: Vec<dashboard::DashHistoryDay>,
     report: dashboard::DashReport,
+    /// True when today is a bi-weekly report day; the dashboard auto-pops
+    /// the receipt modal once per such day (frontend persists the
+    /// already-shown marker in localStorage).
+    is_report_day: bool,
 }
 
 /// Pile-row action: `done | this-week | park | revive`.

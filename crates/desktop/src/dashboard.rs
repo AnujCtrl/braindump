@@ -78,25 +78,17 @@ pub struct DashCounts {
 }
 
 pub fn list_todos(store: &Store, now: DateTime<Utc>) -> Result<Vec<DashTodo>, anyhow::Error> {
-    // Pull all todos plus weekly assignments in two queries; mapping happens
-    // here. v2's status alone doesn't tell us "this-week" vs plain inbox —
-    // weekly_assignments does.
+    // Pull all todos plus weekly assignments. v2's status alone doesn't
+    // tell us "this-week" vs plain inbox — weekly_assignments does.
+    //
+    // Single SELECT, not 6 (per status). Each loop iteration would parse
+    // tags+notes JSON for every row in that bucket; over months the `done`
+    // bucket dominates and the polling refresh would compound the cost.
     let this_week = week_start(now);
     let next_week = this_week + Duration::days(7);
 
     let assignments = read_assignments(store, this_week, next_week)?;
-
-    let mut all: Vec<Todo> = Vec::new();
-    for status in [
-        Status::Unprocessed,
-        Status::Inbox,
-        Status::Active,
-        Status::Waiting,
-        Status::Done,
-        Status::Stale,
-    ] {
-        all.extend(store.list(Some(status), None)?);
-    }
+    let all: Vec<Todo> = store.list(None, None)?;
 
     let out = all
         .into_iter()
@@ -203,11 +195,21 @@ pub fn history(
     Ok(out)
 }
 
-pub fn report(store: &Store, now: DateTime<Utc>) -> Result<DashReport, anyhow::Error> {
+pub fn report(
+    store: &Store,
+    now: DateTime<Utc>,
+    history28: &[DashHistoryDay],
+) -> Result<DashReport, anyhow::Error> {
     let r = bi_weekly_report(store, now)?;
-    let hist = history(store, now, 14)?;
-    let spark_capture = hist.iter().map(|h| h.capture).collect();
-    let spark_complete = hist.iter().map(|h| h.complete).collect();
+
+    // Trailing 14 days of the already-computed 28-day history. Avoids a
+    // second pair of date-bucket queries on every dashboard refresh.
+    let trailing14: Vec<&DashHistoryDay> = history28
+        .iter()
+        .skip(history28.len().saturating_sub(14))
+        .collect();
+    let spark_capture = trailing14.iter().map(|h| h.capture).collect();
+    let spark_complete = trailing14.iter().map(|h| h.complete).collect();
 
     let total_captures: i64 = r.capture_rate.iter().map(|d| d.count).sum();
     let capture_per_week = total_captures / 4;
@@ -218,12 +220,15 @@ pub fn report(store: &Store, now: DateTime<Utc>) -> Result<DashReport, anyhow::E
         0.0
     };
 
-    // Inbox sanity: median across the 4-week buckets.
-    let inbox_sanity = {
-        let mut v: Vec<i64> = r.inbox_sanity.iter().map(|w| w.still_unprocessed).collect();
-        v.sort();
-        v.get(v.len() / 2).copied().unwrap_or(0)
-    };
+    // True median across the 4-week buckets — not the upper-middle that
+    // `Vec::get(len / 2)` returns for even-length input. The receipt
+    // labels this "median"; the math has to agree with the label.
+    let inbox_sanity = median_i64(
+        &r.inbox_sanity
+            .iter()
+            .map(|w| w.still_unprocessed)
+            .collect::<Vec<_>>(),
+    );
 
     let window = format!(
         "{} \u{2192} {}",
@@ -243,6 +248,22 @@ pub fn report(store: &Store, now: DateTime<Utc>) -> Result<DashReport, anyhow::E
         spark_capture,
         spark_complete,
     })
+}
+
+/// Median of a small i64 slice. Returns 0 for empty input — on the receipt
+/// "0 (median)" reads correctly as "no data yet".
+fn median_i64(xs: &[i64]) -> i64 {
+    if xs.is_empty() {
+        return 0;
+    }
+    let mut v = xs.to_vec();
+    v.sort_unstable();
+    let mid = v.len() / 2;
+    if v.len().is_multiple_of(2) {
+        (v[mid - 1] + v[mid]) / 2
+    } else {
+        v[mid]
+    }
 }
 
 /// Park a todo into next week's bucket — the design's "rollover" action.
@@ -409,7 +430,15 @@ mod tests {
             Status::Stale,
             now,
         );
+        let parked = seed(
+            &mut store,
+            "55555555-0000-0000-0000-000000000000",
+            "next week",
+            Status::Inbox,
+            now,
+        );
         pull_into_week(&mut store, &pulled.id, now).unwrap();
+        park_for_next_week(&mut store, &parked.id, now).unwrap();
 
         let todos = list_todos(&store, now).unwrap();
         let by_text: std::collections::HashMap<_, _> = todos
@@ -420,6 +449,36 @@ mod tests {
         assert_eq!(by_text["this week"], "this-week");
         assert_eq!(by_text["done"], "done");
         assert_eq!(by_text["stale"], "stale");
+        assert_eq!(by_text["next week"], "rollover");
+    }
+
+    #[test]
+    fn median_handles_even_and_odd_lengths() {
+        // Empty
+        assert_eq!(median_i64(&[]), 0);
+        // Odd
+        assert_eq!(median_i64(&[7]), 7);
+        assert_eq!(median_i64(&[3, 1, 2]), 2);
+        // Even — must be average of the two middle values, not the upper.
+        // The pre-fix code returned `v[len/2]` which would be 5 here.
+        assert_eq!(median_i64(&[1, 3, 5, 7]), 4);
+        // 4-bucket inbox-sanity shape (the realistic input).
+        assert_eq!(median_i64(&[2, 8, 4, 6]), 5);
+    }
+
+    #[test]
+    fn park_for_next_week_marks_rollover() {
+        let mut store = Store::open_in_memory().unwrap();
+        let now = at("2026-04-22T12:00:00Z");
+        let id = "66666666-0000-0000-0000-000000000000";
+        seed(&mut store, id, "park me", Status::Inbox, now);
+        park_for_next_week(&mut store, id, now).unwrap();
+        // Idempotent — second call no-ops, doesn't bump status off rollover.
+        park_for_next_week(&mut store, id, now).unwrap();
+
+        let todos = list_todos(&store, now).unwrap();
+        let parked = todos.iter().find(|t| t.t == "park me").unwrap();
+        assert_eq!(parked.status, "rollover");
     }
 
     #[test]

@@ -41,21 +41,29 @@ function applyAccentVars(accent) {
 const { invoke } = window.__TAURI__.core;
 const { getCurrentWindow } = window.__TAURI__.window;
 
-// Synthesize a burndown line from current counts. We don't store hourly
-// drain data — this is a faithful port of the design's buildBurndown,
-// which already explicitly synthesized.
-function buildBurndown(counts) {
+// Real burndown from this week's actual completion events. Replaces the
+// design's synthesized hardcoded-drain version — the events table already
+// records every status_change to done with a date, so a faithful daily
+// remaining-count is computable.
+//
+// `history28` is the latest 28 days; we keep only the trailing N days
+// that fall in this ISO week (Mon→Sun).
+function buildBurndown(counts, history28) {
   const totalThisWeek = (counts['this-week'] || 0) + (counts.done || 0) + (counts.rollover || 0);
-  const dow = new Date().getDay();
-  const todayIdx = dow === 0 ? 6 : dow - 1; // Mon=0 .. Sun=6
+  const today = new Date();
+  const dow = today.getDay();
+  const todayIdx = dow === 0 ? 6 : dow - 1; // Mon=0..Sun=6
+
+  // Pick the trailing (todayIdx+1) days from history — those are this
+  // week's elapsed days, in chronological order.
+  const elapsed = history28.slice(-(todayIdx + 1));
+  let cumulative = 0;
   const pts = [];
-  let remaining = totalThisWeek;
   for (let d = 0; d <= 6; d++) {
     const ideal = totalThisWeek * (1 - d / 6);
-    if (d <= todayIdx) {
-      const drain = totalThisWeek * 0.13;
-      remaining = Math.max(0, remaining - drain - (d === 1 ? -1 : d === 3 ? 0.5 : 0));
-      pts.push({ day: d, remaining, ideal, actual: true });
+    if (d <= todayIdx && elapsed[d]) {
+      cumulative += elapsed[d].complete || 0;
+      pts.push({ day: d, remaining: Math.max(0, totalThisWeek - cumulative), ideal, actual: true });
     } else {
       pts.push({ day: d, remaining: null, ideal, actual: false });
     }
@@ -95,10 +103,25 @@ function App() {
     refetch();
     // Cheap polling — supply-chain belts run continuously and feel right
     // when the underlying numbers refresh on a similar cadence.
-    const dataTick = setInterval(refetch, 15000);
+    // Visibility-gated so a hidden window doesn't hammer the lock.
+    const onTick = () => {
+      if (document.visibilityState === 'visible') refetch();
+    };
+    const dataTick = setInterval(onTick, 15000);
     const clockTick = setInterval(() => setNow(new Date()), 30000);
     return () => { clearInterval(dataTick); clearInterval(clockTick); };
   }, [refetch]);
+
+  // Auto-pop the biweekly receipt on report day, once per such day. We
+  // persist the "already shown" marker in localStorage keyed by the ISO
+  // date so the 15s polling refetch doesn't re-trigger every cycle.
+  React.useEffect(() => {
+    if (!snapshot || !snapshot.isReportDay) return;
+    const key = `bd-report-shown-${new Date().toISOString().slice(0, 10)}`;
+    if (localStorage.getItem(key)) return;
+    localStorage.setItem(key, '1');
+    setReport(true);
+  }, [snapshot]);
 
   const onPileAction = async (action, todo) => {
     if (action === 'edit') {
@@ -108,9 +131,29 @@ function App() {
     }
     try {
       await invoke('dashboard_action', { id: todo.id, action });
-      refetch();
+      setLoadError(null);
     } catch (e) {
+      const msg = String(e);
       console.error('dashboard_action failed', e);
+      setLoadError(`action failed: ${msg}`);
+    } finally {
+      // Always refetch so the UI converges back to truth even on failure.
+      refetch();
+    }
+  };
+
+  // SupplyChain workstation MARK DONE — write the real transition, then
+  // refetch so the next render reflects the new status.
+  const onWorkstationComplete = async (realId) => {
+    try {
+      await invoke('dashboard_action', { id: realId, action: 'done' });
+      setLoadError(null);
+    } catch (e) {
+      const msg = String(e);
+      console.error('workstation done failed', e);
+      setLoadError(`could not mark done: ${msg}`);
+    } finally {
+      refetch();
     }
   };
 
@@ -147,7 +190,7 @@ function App() {
   }
 
   const { todos, counts: c, history, report: metrics } = snapshot;
-  const burndown = buildBurndown(c);
+  const burndown = buildBurndown(c, history);
 
   const showRolloverBanner = c.rollover > 0;
   const intakeAvg7d = Math.round(history.slice(-7).reduce((a, b) => a + b.capture, 0) / 7);
@@ -239,6 +282,7 @@ function App() {
             accent={accent}
             mode="stylized"
             onNodeHover={setHoverNode}
+            onComplete={onWorkstationComplete}
           />
         </div>
 
