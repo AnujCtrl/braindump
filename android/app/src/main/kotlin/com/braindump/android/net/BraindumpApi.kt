@@ -3,7 +3,9 @@ package com.braindump.android.net
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import retrofit2.http.Body
+import retrofit2.http.GET
 import retrofit2.http.POST
+import retrofit2.http.Query
 
 /**
  * Wire-format types matching `core::sync::SyncPush` and `core::Todo` in the
@@ -48,7 +50,16 @@ data class SyncPushResponse(
     @SerialName("skipped_tags") val skippedTags: Int = 0,
 )
 
+@Serializable
+data class SyncPull(
+    val todos: List<TodoWire>,
+    val tags: List<TagWire> = emptyList(),
+)
+
 interface BraindumpApi {
     @POST("sync/push")
     suspend fun push(@Body body: SyncPush): SyncPushResponse
+
+    @GET("sync/pull")
+    suspend fun pull(@Query("since") since: String): SyncPull
 }

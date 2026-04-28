@@ -37,6 +37,6 @@ class AppContainer(context: Context) {
     }
 
     val repository: SyncRepository by lazy {
-        SyncRepository(database.todoDao(), database.queueDao()) { api() }
+        SyncRepository(database.todoDao(), database.queueDao(), prefs) { api() }
     }
 }
