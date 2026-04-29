@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<data-extraction-rules>
+    <cloud-backup disableIfNoEncryptionCapabilities="false">
+        <!-- Don't backup the local DB to Google's cloud — sync is the
+             durability story; the DB is regenerable on reinstall. -->
+        <exclude domain="database" path="braindump.db" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="database" path="braindump.db" />
+    </device-transfer>
+</data-extraction-rules>

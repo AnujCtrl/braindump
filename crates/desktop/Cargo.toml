@@ -1,0 +1,37 @@
+[package]
+name = "braindump-desktop"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Braindump v2 desktop app — global-hotkey capture window + dashboard window."
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "braindump-desktop"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+braindump-core = { path = "../core" }
+anyhow = { workspace = true }
+chrono = { workspace = true }
+directories-next = "2"
+reqwest = { workspace = true }
+rusqlite = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tauri = { version = "2", features = [] }
+tauri-plugin-autostart = "2"
+tauri-plugin-global-shortcut = "2"
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+url = "2"
+
+[features]
+default = []

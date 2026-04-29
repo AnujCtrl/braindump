@@ -1,0 +1,15 @@
+<resources>
+    <string name="app_name">braindump</string>
+    <string name="tile_label">braindump</string>
+
+    <string name="capture_label">capture</string>
+    <string name="capture_placeholder">say it now, sort it later</string>
+    <string name="capture_submit">save</string>
+    <string name="capture_dismiss">cancel</string>
+
+    <string name="voice_prompt">braindump capture</string>
+    <string name="voice_cd">dictate via voice</string>
+
+    <string name="settings_label">braindump settings</string>
+    <string name="settings_cd">open settings</string>
+</resources>

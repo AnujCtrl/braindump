@@ -1,0 +1,161 @@
+/* Capture window — visual system mirrors dashboard.css. Kept as a single
+   sheet (no shared base) so the capture window stays a tiny independent
+   asset. Variables are duplicated, not @imported. */
+
+:root {
+  --bg: #000;
+  --panel: #0a0a0b;
+  --hairline: #1c1f23;
+  --hairline-soft: #15171a;
+  --text: #f0f1f3;
+  --text-2: #a3a7ad;
+  --text-3: #6c7077;
+  --text-4: #4a4e54;
+  --good: #5eb8ff;
+  --warn: #f4b740;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: transparent;
+  color: var(--text);
+  font-family: "Inter Tight", ui-sans-serif, system-ui, sans-serif;
+  font-feature-settings: "ss01", "cv01";
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  /* The window is frameless; the body becomes the visible chrome.
+     A thin hairline + dark panel echo the dashboard's panel treatment. */
+  background: var(--panel);
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  padding: 12px 14px 10px;
+  display: flex;
+  align-items: stretch;
+}
+
+.capture {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  height: 100%;
+}
+
+.capture-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--hairline-soft);
+}
+
+.brand { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.brand-mark {
+  width: 14px; height: 14px;
+  border: 1px solid var(--text-3);
+  border-radius: 3px;
+  position: relative;
+}
+.brand-mark::before {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  background: var(--good);
+  opacity: 0.7;
+  border-radius: 1px;
+}
+.brand-mark::after {
+  content: "";
+  position: absolute;
+  left: 2px; right: 2px; top: 50%;
+  height: 1px;
+  background: var(--panel);
+}
+.brand-name { font-weight: 600; font-size: 12px; letter-spacing: -0.01em; }
+.brand-sep  { color: var(--text-4); }
+.brand-sub  {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 9px; letter-spacing: 0.08em;
+  color: var(--text-3);
+  text-transform: uppercase;
+}
+
+.close-btn {
+  appearance: none;
+  background: transparent;
+  border: 1px solid var(--hairline);
+  color: var(--text-3);
+  width: 22px; height: 22px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: color 0.12s, border-color 0.12s, background 0.12s;
+  -webkit-app-region: no-drag;
+}
+.close-btn:hover {
+  color: var(--text);
+  border-color: var(--text-3);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+textarea {
+  flex: 1;
+  resize: none;
+  background: transparent;
+  color: var(--text);
+  border: 0;
+  padding: 6px 0;
+  font-size: 14px;
+  font-family: inherit;
+  font-feature-settings: "ss01", "cv01";
+  outline: none;
+}
+textarea::placeholder {
+  color: var(--text-4);
+}
+
+.capture-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10px;
+  color: var(--text-4);
+  letter-spacing: 0.04em;
+  min-height: 14px;
+}
+
+#status { color: var(--text-3); }
+#status.error { color: var(--warn); }
+#status.ok    { color: var(--good); }
+
+.hint { display: flex; align-items: center; gap: 6px; }
+.hint .sep { color: var(--text-4); opacity: 0.5; }
+.hint kbd {
+  font-family: inherit;
+  font-size: 9px;
+  color: var(--text-2);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--hairline);
+  border-radius: 3px;
+  padding: 1px 5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* The whole window is draggable except for the close button + textarea. */
+header.capture-header,
+.capture-footer {
+  -webkit-app-region: drag;
+}
+textarea, .close-btn, kbd {
+  -webkit-app-region: no-drag;
+}

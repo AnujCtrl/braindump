@@ -1,0 +1,392 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>braindump — dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="dashboard.css" />
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="supply-chain.jsx"></script>
+<script type="text/babel" src="bands.jsx"></script>
+
+<script type="text/babel">
+// Accent palette — design supplied four. Defaulting to cyan; the toggle UI
+// lives in the Tweaks panel (design-time only) so production picks one.
+const ACCENT_PRESETS = {
+  teal:   { good: '#3dd6c4', goodDim: '#1a4d49', warn: '#f4b740', warnDim: '#5a3f10', flow: '#5eb8ff' },
+  sodium: { good: '#ffb547', goodDim: '#553a17', warn: '#ff6b3d', warnDim: '#4a1f12', flow: '#ffd27a' },
+  cyan:   { good: '#5eb8ff', goodDim: '#173a55', warn: '#f4b740', warnDim: '#5a3f10', flow: '#3dd6c4' },
+  green:  { good: '#5fd97a', goodDim: '#1d4a26', warn: '#f4b740', warnDim: '#5a3f10', flow: '#5eb8ff' },
+};
+
+function applyAccentVars(accent) {
+  const p = ACCENT_PRESETS[accent] || ACCENT_PRESETS.cyan;
+  document.documentElement.style.setProperty('--good', p.good);
+  document.documentElement.style.setProperty('--good-dim', p.goodDim);
+  document.documentElement.style.setProperty('--warn', p.warn);
+  document.documentElement.style.setProperty('--warn-dim', p.warnDim);
+  document.documentElement.style.setProperty('--flow', p.flow);
+}
+
+const { invoke } = window.__TAURI__.core;
+const { getCurrentWindow } = window.__TAURI__.window;
+
+// Real burndown from this week's actual completion events. Replaces the
+// design's synthesized hardcoded-drain version — the events table already
+// records every status_change to done with a date, so a faithful daily
+// remaining-count is computable.
+//
+// `history28` is the latest 28 days; we keep only the trailing N days
+// that fall in this ISO week (Mon→Sun).
+function buildBurndown(counts, history28) {
+  const totalThisWeek = (counts['this-week'] || 0) + (counts.done || 0) + (counts.rollover || 0);
+  const today = new Date();
+  const dow = today.getDay();
+  const todayIdx = dow === 0 ? 6 : dow - 1; // Mon=0..Sun=6
+
+  // Pick the trailing (todayIdx+1) days from history — those are this
+  // week's elapsed days, in chronological order.
+  const elapsed = history28.slice(-(todayIdx + 1));
+  let cumulative = 0;
+  const pts = [];
+  for (let d = 0; d <= 6; d++) {
+    const ideal = totalThisWeek * (1 - d / 6);
+    if (d <= todayIdx && elapsed[d]) {
+      cumulative += elapsed[d].complete || 0;
+      pts.push({ day: d, remaining: Math.max(0, totalThisWeek - cumulative), ideal, actual: true });
+    } else {
+      pts.push({ day: d, remaining: null, ideal, actual: false });
+    }
+  }
+  return { points: pts, todayIdx, total: totalThisWeek };
+}
+
+function HeroCopy({ counts }) {
+  const total = counts.inbox + counts['this-week'] + counts.done + counts.rollover + counts.stale;
+  if (total === 0) return 'a quiet week.';
+  if (total < 8) return 'getting started.';
+  if (counts.rollover > 0) return 'a few items want a soft landing.';
+  return 'the week is moving.';
+}
+
+function App() {
+  const accent = 'cyan';
+  const palette = ACCENT_PRESETS[accent];
+  React.useEffect(() => { applyAccentVars(accent); }, []);
+
+  const [snapshot, setSnapshot] = React.useState(null);
+  const [loadError, setLoadError] = React.useState(null);
+  const [report, setReport] = React.useState(false);
+  const [hoverNode, setHoverNode] = React.useState(null);
+  const [now, setNow] = React.useState(() => new Date());
+
+  const refetch = React.useCallback(() => {
+    invoke('dashboard_load')
+      .then((s) => { setSnapshot(s); setLoadError(null); })
+      .catch((e) => setLoadError(String(e)));
+  }, []);
+
+  React.useEffect(() => {
+    // Record one dashboard-open per session. Polling refresh below does NOT
+    // re-log this — return-rate counts visits, not refreshes.
+    invoke('dashboard_record_open').catch(() => {});
+    refetch();
+    // Cheap polling — supply-chain belts run continuously and feel right
+    // when the underlying numbers refresh on a similar cadence.
+    // Visibility-gated so a hidden window doesn't hammer the lock.
+    const onTick = () => {
+      if (document.visibilityState === 'visible') refetch();
+    };
+    const dataTick = setInterval(onTick, 15000);
+    const clockTick = setInterval(() => setNow(new Date()), 30000);
+    return () => { clearInterval(dataTick); clearInterval(clockTick); };
+  }, [refetch]);
+
+  // Auto-pop the biweekly receipt on report day, once per such day. We
+  // persist the "already shown" marker in localStorage keyed by the ISO
+  // date so the 15s polling refetch doesn't re-trigger every cycle.
+  React.useEffect(() => {
+    if (!snapshot || !snapshot.isReportDay) return;
+    const key = `bd-report-shown-${new Date().toISOString().slice(0, 10)}`;
+    if (localStorage.getItem(key)) return;
+    localStorage.setItem(key, '1');
+    setReport(true);
+  }, [snapshot]);
+
+  const onPileAction = async (action, todo) => {
+    if (action === 'edit') {
+      // Edit isn't wired — surface the intent without doing anything,
+      // until we add an editor.
+      return;
+    }
+    try {
+      await invoke('dashboard_action', { id: todo.id, action });
+      setLoadError(null);
+    } catch (e) {
+      const msg = String(e);
+      console.error('dashboard_action failed', e);
+      setLoadError(`action failed: ${msg}`);
+    } finally {
+      // Always refetch so the UI converges back to truth even on failure.
+      refetch();
+    }
+  };
+
+  // SupplyChain workstation MARK DONE — write the real transition, then
+  // refetch so the next render reflects the new status.
+  const onWorkstationComplete = async (realId) => {
+    try {
+      await invoke('dashboard_action', { id: realId, action: 'done' });
+      setLoadError(null);
+    } catch (e) {
+      const msg = String(e);
+      console.error('workstation done failed', e);
+      setLoadError(`could not mark done: ${msg}`);
+    } finally {
+      refetch();
+    }
+  };
+
+  // SupplyChain workstation BACK — demote the item out of this-week back
+  // to plain inbox. Used when the user realizes the on-station item
+  // doesn't actually belong on the conveyor right now.
+  const onWorkstationBack = async (realId) => {
+    try {
+      await invoke('dashboard_action', { id: realId, action: 'back' });
+      setLoadError(null);
+    } catch (e) {
+      console.error('workstation back failed', e);
+      setLoadError(`could not send back: ${String(e)}`);
+    } finally {
+      refetch();
+    }
+  };
+
+  const onCapture = () => {
+    invoke('open_capture').catch((e) => console.error('open_capture failed', e));
+  };
+
+  if (loadError && !snapshot) {
+    return (
+      <div className="app">
+        <div className="topbar">
+          <div className="brand"><div className="brand-mark"></div><div className="brand-name">braindump</div></div>
+          <div className="topbar-status"><span className="dot warn"></span><span>NO DATA</span></div>
+        </div>
+        <div className="panel" style={{padding:36, textAlign:'center', color:'var(--text-3)', fontFamily:'JetBrains Mono, monospace', fontSize:12}}>
+          could not load: {loadError}
+        </div>
+      </div>
+    );
+  }
+
+  if (!snapshot) {
+    return (
+      <div className="app">
+        <div className="topbar">
+          <div className="brand"><div className="brand-mark"></div><div className="brand-name">braindump</div></div>
+          <div className="topbar-status"><span className="dot"></span><span>BOOTING</span></div>
+        </div>
+        <div className="panel" style={{padding:36,textAlign:'center',color:'var(--text-3)',fontFamily:'JetBrains Mono, monospace',fontSize:12}}>
+          loading…
+        </div>
+      </div>
+    );
+  }
+
+  const { todos, counts: c, history, report: metrics } = snapshot;
+  const burndown = buildBurndown(c, history);
+
+  const showRolloverBanner = c.rollover > 0;
+  const intakeAvg7d = Math.round(history.slice(-7).reduce((a, b) => a + b.capture, 0) / 7);
+  const completeAvg7d = Math.round(history.slice(-7).reduce((a, b) => a + b.complete, 0) / 7);
+
+  // Week label: ISO week of `now` and Mon→Sun span.
+  const monday = new Date(now);
+  const dow = monday.getDay();
+  monday.setDate(monday.getDate() - (dow === 0 ? 6 : dow - 1));
+  const sunday = new Date(monday); sunday.setDate(sunday.getDate() + 6);
+  const fmt = (d) => d.toLocaleString('en-US', { month: 'short', day: '2-digit', weekday: 'short' }).toUpperCase();
+  const weekLabel = `${fmt(monday)} → ${fmt(sunday)}`;
+
+  // ISO week number for the topbar label.
+  const wkNumber = (() => {
+    const target = new Date(now);
+    target.setHours(0, 0, 0, 0);
+    target.setDate(target.getDate() + 3 - ((target.getDay() + 6) % 7));
+    const week1 = new Date(target.getFullYear(), 0, 4);
+    return 1 + Math.round(((target - week1) / 86400000 - 3 + ((week1.getDay() + 6) % 7)) / 7);
+  })();
+
+  return (
+    <div className="app">
+      {/* TOP BAR */}
+      <div className="topbar">
+        <div className="topbar-left">
+          <div className="brand">
+            <div className="brand-mark"></div>
+            <div className="brand-name">braindump</div>
+          </div>
+          <span className="brand-sep">·</span>
+          <span className="brand-sub">DASHBOARD / WK {wkNumber}</span>
+        </div>
+        <div className="topbar-right">
+          <div className="topbar-status">
+            <span className={`dot ${c.rollover > 0 ? 'warn' : ''}`}></span>
+            <span>{c.rollover > 0 ? 'ATTENTION' : 'NOMINAL'}</span>
+          </div>
+          <div className="clock">{now.toLocaleString('en-US', { month: 'short', day: '2-digit', weekday: 'short' }).toUpperCase()} · {now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })}</div>
+        </div>
+      </div>
+
+      {/* HERO */}
+      <div className="hero">
+        <div className="hero-left">
+          <h1>{HeroCopy({ counts: c })}</h1>
+          <div className="week-meta">{weekLabel} · {c['this-week']} ACTIVE · {c.done} CLEARED · {c.inbox} WAITING</div>
+        </div>
+        <div className="hero-right">
+          <button className="pill-btn" onClick={refetch} title="reload data">refresh</button>
+          <button className="pill-btn" onClick={() => setReport(true)}>biweekly report</button>
+          <button className="pill-btn primary" onClick={onCapture}>+ capture</button>
+        </div>
+      </div>
+
+      {/* BAND 1 — supply chain */}
+      <div className="band band1">
+        <div className="band-head">
+          <div className="band-title">// THE WEEK AS A FLOW</div>
+          <div className="band-sub">stylized · live data</div>
+        </div>
+
+        {showRolloverBanner && (
+          <div className="rollover-banner">
+            <div className="rollover-banner-left">
+              <span className="icon"></span>
+              <span><span style={{fontWeight:600}}>{c.rollover} item{c.rollover === 1 ? '' : 's'}</span> will roll to next week unless you act.</span>
+            </div>
+            <div className="rollover-banner-right">
+              <button className="pill-btn">review</button>
+            </div>
+          </div>
+        )}
+
+        <div className="panel sc-panel">
+          <div className="sc-overlay">
+            <div className="sc-overlay-pulse"><span className="ring"></span> LIVE</div>
+            {hoverNode && (
+              <div className="sc-overlay-meta" style={{color:'var(--text-2)'}}>
+                → {hoverNode.toUpperCase()}
+              </div>
+            )}
+          </div>
+          <SupplyChain
+            counts={c}
+            items={todos}
+            intensity={95}
+            accent={accent}
+            mode="stylized"
+            onNodeHover={setHoverNode}
+            onComplete={onWorkstationComplete}
+            onSendBack={onWorkstationBack}
+          />
+        </div>
+
+        <div className="chart-row">
+          <div className="panel">
+            <div className="band-head" style={{marginBottom:14}}>
+              <div className="band-title" style={{fontSize:11}}>BURNDOWN · THIS WEEK</div>
+              <div className="band-sub">slope projection</div>
+            </div>
+            <BurndownChart data={burndown} palette={palette} accentName={accent} />
+          </div>
+          <div className="panel">
+            <div className="band-head" style={{marginBottom:14}}>
+              <div className="band-title" style={{fontSize:11}}>RIGHT NOW</div>
+              <div className="band-sub">absolute volumes</div>
+            </div>
+            <div className="stat-grid">
+              <div className="chart-stat">
+                <div className="num" style={{color:'var(--text)'}}>{c.inbox}</div>
+                <div className="label">INTAKE</div>
+              </div>
+              <div className="chart-stat">
+                <div className="num" style={{color:'var(--good)'}}>{c['this-week']}</div>
+                <div className="label">ACTIVE LANE</div>
+              </div>
+              <div className="chart-stat">
+                <div className="num" style={{color:'var(--text-2)'}}>{c.done}</div>
+                <div className="label">DRAINED THIS WK</div>
+              </div>
+              <div className="chart-stat">
+                <div className="num" style={{color:'var(--warn)'}}>{c.rollover}</div>
+                <div className="label">PARKED</div>
+              </div>
+              <div className="chart-stat">
+                <div className="num" style={{color:'var(--text-3)'}}>{intakeAvg7d}<span style={{fontSize:13,color:'var(--text-4)'}}>/d</span></div>
+                <div className="label">INTAKE 7D AVG</div>
+              </div>
+              <div className="chart-stat">
+                <div className="num" style={{color:'var(--text-3)'}}>{completeAvg7d}<span style={{fontSize:13,color:'var(--text-4)'}}>/d</span></div>
+                <div className="label">DRAIN 7D AVG</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* BAND 2 — encouraging history */}
+      <div className="band band2-wrap">
+        <div className="band-head">
+          <div className="band-title">// WHAT YOUR BRAIN MADE & BURNED THROUGH</div>
+          <div className="band-sub">28 days · side-by-side, never a ratio</div>
+        </div>
+        <div className="band2">
+          <div className="panel contrib-panel">
+            <h4>CAPTURE — last 28d</h4>
+            <ContribGraph history={history} kind="capture" palette={palette} />
+          </div>
+          <div className="panel contrib-panel">
+            <h4>COMPLETION — last 28d</h4>
+            <ContribGraph history={history} kind="complete" palette={palette} />
+          </div>
+        </div>
+        <div className="panel">
+          <div className="band-head" style={{marginBottom:14}}>
+            <div className="band-title" style={{fontSize:11}}>VOLUME · ROLLING WINDOWS</div>
+            <div className="band-sub">absolute, not relative</div>
+          </div>
+          <VolumeBars history={history} palette={palette} />
+        </div>
+      </div>
+
+      {/* BAND 3 — pile */}
+      <div className="band">
+        <div className="band-head">
+          <div className="band-title">// THE PILE</div>
+          <div className="band-sub">{todos.length} items · housekeeping surface</div>
+        </div>
+        <div className="panel" style={{padding:'14px 18px'}}>
+          <Pile todos={todos} palette={palette} onAction={onPileAction} />
+        </div>
+      </div>
+
+      {report && <ReportModal metrics={metrics} palette={palette} onClose={() => setReport(false)} />}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
